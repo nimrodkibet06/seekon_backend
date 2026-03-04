@@ -1,6 +1,6 @@
 # Seekon Backend API
 
-Backend API for Seekon Apparel using Node.js, Express, MongoDB, Cloudinary, and Daraja.
+Backend API for Seekon Apparel using Node.js, Express, MongoDB, Cloudinary, and Daraja..
 
 ## 🚀 Features
 
