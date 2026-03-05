@@ -19,15 +19,26 @@ export const createOrder = async (req, res) => {
     } = req.body;
 
     // Get user from auth middleware - MUST exist since route is protected
-    const userId = req.user?._id || req.user?.userId || req.user?.id;
-    const userEmail = req.user?.email;
+    const userId = req.user?.userId || req.user?._id || req.user?.id;
     
     // CRITICAL: Do NOT allow guest checkout if authenticated
-    if (!userId || !userEmail) {
+    if (!userId) {
       return res.status(401).json({
         success: false,
         message: 'Authentication required. Please log in to place an order.'
       });
+    }
+    
+    // Get user email from database since JWT doesn't include email
+    let userEmail = req.user?.email;
+    if (!userEmail) {
+      try {
+        const User = (await import('../models/User.js')).default;
+        const user = await User.findById(userId).select('email');
+        userEmail = user?.email;
+      } catch (e) {
+        console.error('Error fetching user email:', e);
+      }
     }
 
     if (!items || items.length === 0) {
