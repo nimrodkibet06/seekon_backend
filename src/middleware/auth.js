@@ -5,6 +5,16 @@ import jwt from 'jsonwebtoken';
  */
 export const authMiddleware = (req, res, next) => {
   try {
+    // Debug: Log JWT_SECRET presence
+    if (!process.env.JWT_SECRET) {
+      console.error('🚨 CRITICAL: JWT_SECRET is not defined in environment!');
+      return res.status(500).json({
+        success: false,
+        message: 'Server configuration error'
+      });
+    }
+    
+    console.log('🔐 JWT_SECRET is present:', process.env.JWT_SECRET ? 'YES' : 'NO');
     // Get token from Authorization header
     const authHeader = req.headers.authorization;
     
@@ -30,6 +40,24 @@ export const authMiddleware = (req, res, next) => {
     next();
   } catch (error) {
     console.error('❌ Token verification failed:', error.message);
+    console.error('❌ Error name:', error.name);
+    
+    if (error.name === 'TokenExpiredError') {
+      console.error('⏰ Token has expired');
+      return res.status(401).json({
+        success: false,
+        message: 'Token has expired. Please log in again.',
+        error: 'TokenExpiredError'
+      });
+    } else if (error.name === 'JsonWebTokenError') {
+      console.error('🔑 Token is invalid');
+      return res.status(401).json({
+        success: false,
+        message: 'Invalid token',
+        error: 'JsonWebTokenError'
+      });
+    }
+    
     return res.status(401).json({
       success: false,
       message: 'Invalid or expired token',
