@@ -60,6 +60,16 @@ const generatePassword = () => {
   }
 
   const password = Buffer.from(`${shortcode}${finalPasskey}${timestamp}`).toString('base64');
+  
+  // DEBUG: Log the generated password with masked middle part
+  const maskedPassword = password.substring(0, 10) + '...' + password.substring(password.length - 10);
+  console.log(`🔐 DEBUG M-Pesa Password Generation:`);
+  console.log(`   Shortcode: ${shortcode}`);
+  console.log(`   Timestamp: ${timestamp}`);
+  console.log(`   Passkey: ${finalPasskey.substring(0, 5)}...${finalPasskey.substring(finalPasskey.length - 5)}`);
+  console.log(`   Generated Password: ${maskedPassword}`);
+  console.log(`   Full Base64 Length: ${password.length}`);
+  
   return { password, timestamp };
 };
 
