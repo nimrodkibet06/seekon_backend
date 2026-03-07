@@ -224,15 +224,27 @@ export const sendContactEmail = async (name, email, subject, message) => {
       to: adminEmail,
       reply_to: email,
       subject: `New Inquiry: ${subject}`,
-      html: `<div style="font-family: sans-serif; padding: 20px;">
-        <h2>New message from Seekon Contact Form</h2>
-        <p><strong>Name:</strong> ${name}</p>
-        <p><strong>Email:</strong> ${email}</p>
-        <p><strong>Subject:</strong> ${subject}</p>
-        <hr/>
-        <p><strong>Message:</strong></p>
-        <p style="white-space: pre-wrap; background: #f4f4f4; padding: 15px; border-radius: 5px;">${message}</p>
-      </div>`
+      html: `
+        <div style="font-family: sans-serif; padding: 20px; max-width: 600px; margin: 0 auto; color: #333;">
+          <h2 style="color: #00A676;">New Message from Seekon Contact Form</h2>
+          <p><strong>Name:</strong> ${name}</p>
+          <p><strong>Email:</strong> ${email}</p>
+          <p><strong>Subject:</strong> ${subject}</p>
+          <hr style="border: none; border-top: 1px solid #eee; margin: 20px 0;" />
+          <p><strong>Message:</strong></p>
+          <p style="white-space: pre-wrap; background: #f9f9f9; padding: 15px; border-radius: 8px; border-left: 4px solid #00A676;">${message}</p>
+          
+          <div style="margin-top: 30px; text-align: center;">
+            <a href="mailto:${email}?subject=Re: ${subject}" style="background-color: #00A676; color: white; padding: 12px 24px; text-decoration: none; border-radius: 6px; font-weight: bold; display: inline-block;">
+              Reply Directly to ${name}
+            </a>
+            <p style="font-size: 12px; color: #888; margin-top: 15px;">
+              If the button above doesn't work, you can reply directly to: <br/>
+              <strong>${email}</strong>
+            </p>
+          </div>
+        </div>
+      `
     });
     return { success: true, message: 'Message sent to admin', data };
   } catch (error) {
