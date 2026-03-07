@@ -211,7 +211,7 @@ export const sendOTPEmail = async (email, otp) => {
 // Function to send contact form submissions to Admin Gmail
 export const sendContactEmail = async (name, email, subject, message) => {
   const resend = getResendClient();
-  const adminEmail = 'nimrodkibet06@gmail.com';
+  const adminEmail = 'seekonapparel77@gmail.com';
 
   if (!resend) {
     console.log(`\n📧 NEW CONTACT MESSAGE\nFrom: ${name} (${email})\nSubject: ${subject}\nMessage: ${message}\n`);
