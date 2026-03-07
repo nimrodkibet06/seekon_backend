@@ -1,5 +1,5 @@
 import express from 'express';
-import { getFlashSaleSettings, updateFlashSaleSettings, getHomeSettings, updateHomeSettings, getExchangeRate, updateExchangeRate } from '../controllers/settingController.js';
+import { getFlashSaleSettings, updateFlashSaleSettings, getHomeSettings, updateHomeSettings, getExchangeRate, updateExchangeRate, submitContactForm } from '../controllers/settingController.js';
 import { authMiddleware, adminMiddleware } from '../middleware/auth.js';
 
 const router = express.Router();
@@ -17,5 +17,8 @@ router.put('/flash-sale', authMiddleware, adminMiddleware, updateFlashSaleSettin
 // Home Page Settings (Public GET, Admin PUT)
 router.get('/home', getHomeSettings);
 router.put('/home', authMiddleware, adminMiddleware, updateHomeSettings);
+
+// Contact Form (Public POST)
+router.post('/contact', submitContactForm);
 
 export default router;

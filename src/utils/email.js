@@ -207,3 +207,36 @@ export const sendOTPEmail = async (email, otp) => {
     return { success: false, message: error.message };
   }
 };
+
+// Function to send contact form submissions to Admin Gmail
+export const sendContactEmail = async (name, email, subject, message) => {
+  const resend = getResendClient();
+  const adminEmail = 'seekonapparel77@gmail.com';
+
+  if (!resend) {
+    console.log(`\n📧 NEW CONTACT MESSAGE\nFrom: ${name} (${email})\nSubject: ${subject}\nMessage: ${message}\n`);
+    return { success: true, development: true };
+  }
+
+  try {
+    const data = await resend.emails.send({
+      from: 'Seekon Contact Form <noreply@seek-on.app>',
+      to: adminEmail,
+      reply_to: email,
+      subject: `New Inquiry: ${subject}`,
+      html: `<div style="font-family: sans-serif; padding: 20px;">
+        <h2>New message from Seekon Contact Form</h2>
+        <p><strong>Name:</strong> ${name}</p>
+        <p><strong>Email:</strong> ${email}</p>
+        <p><strong>Subject:</strong> ${subject}</p>
+        <hr/>
+        <p><strong>Message:</strong></p>
+        <p style="white-space: pre-wrap; background: #f4f4f4; padding: 15px; border-radius: 5px;">${message}</p>
+      </div>`
+    });
+    return { success: true, message: 'Message sent to admin', data };
+  } catch (error) {
+    console.error('❌ Error sending contact email:', error.message);
+    return { success: false, message: error.message };
+  }
+};

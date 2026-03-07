@@ -1,4 +1,5 @@
 import Setting from '../models/Setting.js';
+import { sendContactEmail } from '../utils/email.js';
 
 // Get exchange rate (Public)
 export const getExchangeRate = async (req, res) => {
@@ -118,5 +119,27 @@ export const updateHomeSettings = async (req, res) => {
     res.status(200).json(settings.value);
   } catch (error) {
     res.status(500).json({ message: 'Server error updating home settings' });
+  }
+};
+
+// Submit Contact Form
+export const submitContactForm = async (req, res) => {
+  try {
+    const { firstName, lastName, email, subject, message } = req.body;
+
+    if (!firstName || !email || !message) {
+      return res.status(400).json({ success: false, message: 'Please fill in all required fields.' });
+    }
+
+    const fullName = `${firstName} ${lastName || ''}`.trim();
+    const result = await sendContactEmail(fullName, email, subject, message);
+
+    if (result.success) {
+      res.status(200).json({ success: true, message: 'Your message has been sent successfully!' });
+    } else {
+      res.status(500).json({ success: false, message: 'Failed to send message. Please try again later.' });
+    }
+  } catch (error) {
+    res.status(500).json({ success: false, message: 'Server error processing contact form.' });
   }
 };
