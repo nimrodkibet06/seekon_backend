@@ -12,15 +12,33 @@ const decrementInventory = async (orderItems) => {
     for (const item of orderItems) {
       const productId = item.product || item.productId || item._id;
       if (productId) {
-        await Product.findByIdAndUpdate(productId, {
-          $inc: { 
-            countInStock: -item.quantity,
-            stock: -item.quantity // Deducting both just to cover standard schema variations
+        // Decrement stock and get the updated product back
+        const updatedProduct = await Product.findByIdAndUpdate(
+          productId,
+          { $inc: { stock: -item.quantity } },
+          { new: true } // Crucial: returns the document AFTER the decrement
+        );
+
+        if (updatedProduct) {
+          // 1. If it hit 0, flip inStock to false and send Out of Stock Alert
+          if (updatedProduct.stock <= 0) {
+            await Product.findByIdAndUpdate(productId, { inStock: false });
+            await Notification.create({
+              type: 'SYSTEM',
+              message: `🚨 OUT OF STOCK: ${updatedProduct.name} has sold out!`
+            });
+          } 
+          // 2. If it dropped below 10, send Low Stock Alert
+          else if (updatedProduct.stock < 10) {
+            await Notification.create({
+              type: 'SYSTEM', 
+              message: `⚠️ LOW STOCK: ${updatedProduct.name} only has ${updatedProduct.stock} left.`
+            });
           }
-        });
+        }
       }
     }
-    console.log('✅ Inventory decremented successfully');
+    console.log('✅ Inventory decremented and notifications checked.');
   } catch (err) {
     console.error('⚠️ Error decrementing inventory:', err.message);
   }

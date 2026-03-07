@@ -22,7 +22,7 @@ export const getCart = async (req, res) => {
     // Note: Cart model uses 'productId' not 'product'
     let cart = await Cart.findOne({ userId }).populate({
       path: 'items.productId',
-      select: 'name price image category countInStock brand'
+      select: 'name price image category stock inStock brand'
     });
     
     console.log('🛒 FETCH_CART: Raw cart result:', cart ? `Found with ${cart.items.length} items` : 'NULL');

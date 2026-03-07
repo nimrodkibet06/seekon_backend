@@ -11,10 +11,14 @@ const JWT_SECRET = process.env.JWT_SECRET || 'seekon_secret_key';
 export const getAdminStats = async (req, res) => {
   try {
     // Get counts for users, products, and orders
-    const [totalUsers, totalOrders, productCount] = await Promise.all([
+    const [totalUsers, totalOrders, productCount, outOfStockCount, lowStockCount] = await Promise.all([
       User.countDocuments({}),
       Order.countDocuments({}),
-      Product.countDocuments()
+      Product.countDocuments(),
+      // Out of stock means stock is 0 or less
+      Product.countDocuments({ stock: { $lte: 0 } }),
+      // Low stock means between 1 and 9
+      Product.countDocuments({ stock: { $gt: 0, $lt: 10 } })
     ]);
     
     // Calculate total revenue (sum of totalAmount where isPaid is true)
@@ -142,7 +146,9 @@ export const getAdminStats = async (req, res) => {
           pending: 0,
           users: totalUsers,
           products: productCount,
-          orders: totalOrders
+          orders: totalOrders,
+          outOfStock: outOfStockCount,
+          lowStock: lowStockCount
         },
         weeklyRevenue: weeklyRevenue,
         monthlySales: monthlySales,
@@ -318,10 +324,14 @@ export const getDashboardStats = async (req, res) => {
     };
 
     // Get counts for users, products, and orders
-    const [userCount, productCount, orderCount] = await Promise.all([
+    const [userCount, productCount, orderCount, outOfStockCount, lowStockCount] = await Promise.all([
       User.countDocuments(),
       Product.countDocuments(),
-      Order.countDocuments()
+      Order.countDocuments(),
+      // Out of stock means stock is 0 or less
+      Product.countDocuments({ stock: { $lte: 0 } }),
+      // Low stock means between 1 and 9
+      Product.countDocuments({ stock: { $gt: 0, $lt: 10 } })
     ]);
 
     // Get recent orders for dashboard
@@ -348,7 +358,9 @@ export const getDashboardStats = async (req, res) => {
           ...total,
           users: userCount,
           products: productCount,
-          orders: orderCount
+          orders: orderCount,
+          outOfStock: outOfStockCount,
+          lowStock: lowStockCount
         },
         weeklyRevenue
       },
