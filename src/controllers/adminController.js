@@ -508,83 +508,179 @@ export const exportTransactions = async (req, res) => {
   }
 };
 
-// Get Analytics Data - Real data for charts
-// Filter by 'delivered' status since payment system is in development
+// Get Analytics Data - Real data for charts using MongoDB Aggregation
+// Uses isPaid or status filter based on query parameter
 export const getAnalytics = async (req, res) => {
   try {
-    // Fetch totalUsers independently - never depends on orders
+    // Get period from query parameter (default: month)
+    const period = req.query.period || 'month';
+    
+    // Get total users count
     const totalUsers = await User.countDocuments({});
     
-    // Fetch ONLY delivered orders for analytics calculation
-    const deliveredOrders = await Order.find({ status: 'delivered' }).populate('items.product');
+    // ==============================================
+    // CALCULATE DATE RANGE BASED ON PERIOD
+    // ==============================================
+    const now = new Date();
+    let startDate;
+    let dateFormat;
+    let groupBy;
+    let labelFormat;
     
-    // Calculate totalOrders and totalRevenue from delivered orders
-    const totalOrders = deliveredOrders.length;
-    const totalRevenue = deliveredOrders.reduce((acc, order) => acc + (order.totalAmount || 0), 0);
-    
-    // Revenue Trends: Group delivered orders by createdAt date (last 7 days)
-    const dayNames = ['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat'];
-    const sevenDaysAgo = new Date();
-    sevenDaysAgo.setDate(sevenDaysAgo.getDate() - 6); // Include today, go back 6 days
-    
-    // Initialize revenue map for last 7 days
-    const revenueByDay = {};
-    for (let i = 0; i < 7; i++) {
-      const date = new Date();
-      date.setDate(date.getDate() - i);
-      const dateStr = date.toISOString().split('T')[0];
-      revenueByDay[dateStr] = 0;
+    if (period === 'week') {
+      // Last 7 days
+      startDate = new Date(now);
+      startDate.setDate(startDate.getDate() - 7);
+      dateFormat = '%Y-%m-%d';
+      groupBy = { $dateToString: { format: dateFormat, date: '$createdAt' } };
+      labelFormat = (date) => {
+        const dayNames = ['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat'];
+        return dayNames[new Date(date).getDay()];
+      };
+    } else if (period === 'year') {
+      // Last 12 months
+      startDate = new Date(now);
+      startDate.setFullYear(startDate.getFullYear() - 1);
+      groupBy = { year: { $year: '$createdAt' }, month: { $month: '$createdAt' } };
+      labelFormat = (dateObj) => {
+        const monthNames = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'];
+        return monthNames[(dateObj.month || 1) - 1];
+      };
+    } else {
+      // Default: month (last 30 days or 4 weeks)
+      startDate = new Date(now);
+      startDate.setDate(startDate.getDate() - 30);
+      dateFormat = '%Y-%m-%d';
+      groupBy = { $dateToString: { format: dateFormat, date: '$createdAt' } };
+      labelFormat = (date) => {
+        const d = new Date(date);
+        return `${d.getMonth() + 1}/${d.getDate()}`;
+      };
     }
     
-    // Group delivered orders by date
-    deliveredOrders.forEach(order => {
-      if (order.createdAt) {
-        const dateStr = order.createdAt.toISOString().split('T')[0];
-        if (revenueByDay.hasOwnProperty(dateStr)) {
-          revenueByDay[dateStr] += order.totalAmount || 0;
+    // ==============================================
+    // 1. REVENUE OVER TIME - MongoDB Aggregation
+    // Filter: isPaid: true OR status in [processing, shipped, delivered]
+    // ==============================================
+    const monthNames = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'];
+    
+    // MongoDB Aggregation: Group orders by period
+    const revenueAggregation = await Order.aggregate([
+      {
+        $match: {
+          $or: [
+            { isPaid: true },
+            { status: { $in: ['processing', 'shipped', 'delivered'] } }
+          ],
+          createdAt: { $gte: startDate }
         }
-      }
-    });
+      },
+      {
+        $group: {
+          _id: groupBy,
+          revenue: { $sum: '$totalAmount' },
+          count: { $sum: 1 }
+        }
+      },
+      { $sort: { '_id': 1 } }
+    ]);
     
-    // Convert to array format [{ name: 'Mon', value: 5000 }, ...]
-    const revenueTrends = Object.entries(revenueByDay)
-      .sort(([a], [b]) => a.localeCompare(b))
-      .map(([dateStr, value]) => {
-        const date = new Date(dateStr);
+    // Format revenue trends based on period
+    const revenueTrends = revenueAggregation.map(item => {
+      if (period === 'year') {
         return {
-          name: dayNames[date.getDay()],
-          value: value
+          month: monthNames[(item._id.month || 1) - 1],
+          value: item.revenue || 0,
+          count: item.count || 0
         };
-      });
-    
-    // Category Sales: Loop through delivered order items, fetch their product category
-    const categoryMap = {};
-    deliveredOrders.forEach(order => {
-      if (order.items && order.items.length > 0) {
-        order.items.forEach(item => {
-          if (item.product && item.product.category) {
-            const category = item.product.category;
-            categoryMap[category] = (categoryMap[category] || 0) + (item.quantity || 1);
-          }
-        });
+      } else {
+        return {
+          month: labelFormat(item._id),
+          value: item.revenue || 0,
+          count: item.count || 0
+        };
       }
     });
     
-    // If no orders yet, fall back to product count by category
-    if (Object.keys(categoryMap).length === 0) {
-      const productCategories = await Product.aggregate([
-        { $group: { _id: '$category', count: { $sum: 1 } } }
-      ]);
-      productCategories.forEach(cat => {
-        categoryMap[cat._id || 'Uncategorized'] = cat.count;
-      });
+    // ==============================================
+    // 2. CATEGORY DISTRIBUTION - Product counts by category
+    // ==============================================
+    const categoryDistribution = await Product.aggregate([
+      { $group: { _id: '$category', count: { $sum: 1 } } },
+      { $sort: { count: -1 } }
+    ]);
+    
+    const categoryCounts = categoryDistribution.map(cat => ({
+      name: cat._id || 'Uncategorized',
+      value: cat.count || 0
+    }));
+    
+    // ==============================================
+    // 3. SALES BY CATEGORY - Revenue by category
+    // ==============================================
+    const salesByCategoryRaw = await Order.aggregate([
+      {
+        $match: {
+          $or: [
+            { isPaid: true },
+            { status: { $in: ['processing', 'shipped', 'delivered'] } }
+          ]
+        }
+      },
+      { $unwind: '$items' },
+      {
+        $lookup: {
+          from: 'products',
+          localField: 'items.product',
+          foreignField: '_id',
+          as: 'productInfo'
+        }
+      },
+      { $unwind: '$productInfo' },
+      {
+        $group: {
+          _id: '$productInfo.category',
+          revenue: { $sum: { $multiply: ['$items.price', '$items.quantity'] } },
+          quantity: { $sum: '$items.quantity' }
+        }
+      },
+      { $sort: { revenue: -1 } }
+    ]);
+    
+    const categorySales = salesByCategoryRaw.map(cat => ({
+      name: cat._id || 'Uncategorized',
+      value: cat.revenue || 0,
+      quantity: cat.quantity || 0
+    }));
+    
+    // Fallback: If no orders yet, use product count by category
+    if (categorySales.length === 0) {
+      categorySales.push(...categoryCounts);
     }
     
-    // Convert to array format [{ name: 'Footwear', value: 12 }, ...]
-    const categorySales = Object.entries(categoryMap).map(([name, value]) => ({
-      name: name || 'Uncategorized',
-      value: value || 0
-    }));
+    // ==============================================
+    // CALCULATE TOTALS
+    // ==============================================
+    const totalOrders = await Order.countDocuments({
+      $or: [
+        { isPaid: true },
+        { status: { $in: ['processing', 'shipped', 'delivered'] } }
+      ]
+    });
+    
+    const totalRevenueResult = await Order.aggregate([
+      {
+        $match: {
+          $or: [
+            { isPaid: true },
+            { status: { $in: ['processing', 'shipped', 'delivered'] } }
+          ]
+        }
+      },
+      { $group: { _id: null, total: { $sum: '$totalAmount' } } }
+    ]);
+    
+    const totalRevenue = totalRevenueResult[0]?.total || 0;
     
     res.json({
       success: true,
@@ -592,7 +688,9 @@ export const getAnalytics = async (req, res) => {
       totalOrders,
       totalUsers,
       revenueTrends,
-      categorySales
+      categorySales,
+      categoryCounts,
+      period // Return the period used for debugging
     });
   } catch (error) {
     console.error('Error fetching analytics:', error);

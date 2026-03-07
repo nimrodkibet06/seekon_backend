@@ -1,4 +1,8 @@
 import express from 'express';
+import rateLimit from 'express-rate-limit';
+import { v2 as cloudinary } from 'cloudinary';
+import User from '../models/User.js';
+import bcrypt from 'bcryptjs';
 import {
   adminLogin,
   getAdminStats,
@@ -33,21 +37,33 @@ import Notification from '../models/Notification.js';
 
 const router = express.Router();
 
+// Rate limiting for admin login to prevent brute-force attacks
+const adminLoginLimiter = rateLimit({
+  windowMs: 15 * 60 * 1000, // 15 minutes
+  max: 5, // Limit each IP to 5 login attempts per windowMs
+  message: {
+    success: false,
+    message: 'Too many admin login attempts. Please try again after 15 minutes.'
+  },
+  standardHeaders: true,
+  legacyHeaders: false,
+});
+
 // Public routes
-router.post('/login', adminLogin);
+router.post('/login', adminLoginLimiter, adminLogin);
 
 // Protected routes - require authentication
 router.get('/stats', authMiddleware, adminMiddleware, getAdminStats);
 router.get('/analytics', authMiddleware, adminMiddleware, getAnalytics);
-router.get('/dashboard', authMiddleware, getDashboardStats);
-router.get('/transactions', authMiddleware, getAllTransactions);
+router.get('/dashboard', authMiddleware, adminMiddleware, getDashboardStats);
+router.get('/transactions', authMiddleware, adminMiddleware, getAllTransactions);
 router.get('/transactions/:id', authMiddleware, getTransaction);
-router.get('/transactions/export/csv', authMiddleware, exportTransactions);
+router.get('/transactions/export/csv', authMiddleware, adminMiddleware, exportTransactions);
 
 // User management
-router.get('/users', authMiddleware, getAllUsers);
-router.get('/users/:id', authMiddleware, getUser);
-router.post('/users', authMiddleware, async (req, res) => {
+router.get('/users', authMiddleware, adminMiddleware, getAllUsers);
+router.get('/users/:id', authMiddleware, adminMiddleware, getUser);
+router.post('/users', authMiddleware, adminMiddleware, async (req, res) => {
   try {
     const { name, email, phone, password, role = 'user' } = req.body;
     
@@ -58,24 +74,21 @@ router.post('/users', authMiddleware, async (req, res) => {
         message: 'Name, email, and password are required'
       });
     }
-
-    const User = await import('../models/User.js');
-    const bcrypt = await import('bcryptjs');
     
     // Check if user exists
-    const existingUser = await User.default.findOne({ email });
+    const existingUser = await User.findOne({ email });
     if (existingUser) {
       return res.status(400).json({
         success: false,
         message: 'User already exists'
       });
     }
-
+    
     // Hash password
-    const hashedPassword = await bcrypt.default.hash(password, 10);
+    const hashedPassword = await bcrypt.hash(password, 10);
 
     // Create user
-    const user = await User.default.create({
+    const user = await User.create({
       name,
       email,
       phone,
@@ -140,7 +153,7 @@ router.patch('/users/:id/role', authMiddleware, adminMiddleware, async (req, res
     });
   }
 });
-router.delete('/users/:id', authMiddleware, deleteUser);
+router.delete('/users/:id', authMiddleware, adminMiddleware, deleteUser);
 
 // Product management
 router.get('/products', authMiddleware, adminMiddleware, getAllProducts);
@@ -150,7 +163,7 @@ router.put('/products/:id', authMiddleware, adminMiddleware, updateProduct);
 router.delete('/products/:id', authMiddleware, adminMiddleware, deleteProduct);
 
 // Order management
-router.get('/orders', authMiddleware, getAllOrders);
+router.get('/orders', authMiddleware, adminMiddleware, getAllOrders);
 router.get('/orders/:id', authMiddleware, getOrder);
 router.patch('/orders/:id/status', authMiddleware, updateOrderStatus);
 router.patch('/orders/:id/cancel', authMiddleware, cancelOrder);
@@ -210,11 +223,10 @@ router.put('/notifications/:id/read', authMiddleware, adminMiddleware, async (re
 });
 
 // Cloudinary management
-router.post('/cloudinary/delete', authMiddleware, async (req, res) => {
+router.post('/cloudinary/delete', authMiddleware, adminMiddleware, async (req, res) => {
   try {
     const { publicId } = req.body;
     
-    const cloudinary = require('cloudinary').v2;
     const result = await cloudinary.uploader.destroy(publicId);
     
     res.json({ success: true, result });
