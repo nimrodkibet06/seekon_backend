@@ -2,8 +2,29 @@ import Transaction from '../models/Transaction.js';
 import Order from '../models/Order.js';
 import Cart from '../models/Cart.js';
 import Notification from '../models/Notification.js';
+import Product from '../models/Product.js';
 import crypto from 'crypto';
 import axios from 'axios';
+
+// Helper function to decrement inventory on successful payment
+const decrementInventory = async (orderItems) => {
+  try {
+    for (const item of orderItems) {
+      const productId = item.product || item.productId || item._id;
+      if (productId) {
+        await Product.findByIdAndUpdate(productId, {
+          $inc: { 
+            countInStock: -item.quantity,
+            stock: -item.quantity // Deducting both just to cover standard schema variations
+          }
+        });
+      }
+    }
+    console.log('✅ Inventory decremented successfully');
+  } catch (err) {
+    console.error('⚠️ Error decrementing inventory:', err.message);
+  }
+};
 
 // M-Pesa OAuth token (Production API)
 const getMpesaAccessToken = async () => {
@@ -355,6 +376,9 @@ export const mpesaCallback = async (req, res) => {
             await order.save();
             console.log(`✅ Order ${order._id} marked as paid!`);
 
+            // Decrement inventory on successful payment
+            await decrementInventory(order.items);
+
             // Clear the user's cart ONLY when payment succeeds
             // CRITICAL: Use order.user from the Order document, NOT req.user
             // Safaricom webhooks do NOT send auth headers
@@ -455,6 +479,9 @@ const processMpesaResult = async (resultCode, checkoutRequestID, amount, mpesaRe
         order.status = 'processing';
         await order.save();
         console.log(`✅ Order ${order._id} marked as paid via query!`);
+        
+        // Decrement inventory on successful payment
+        await decrementInventory(order.items);
         
         // Clear the user's cart ONLY when payment succeeds
         // CRITICAL: Use order.user from the Order document, NOT req.user
@@ -738,6 +765,9 @@ export const flutterwaveCallback = async (req, res) => {
           };
           order.status = 'processing';
           await order.save();
+          
+          // Decrement inventory on successful payment
+          await decrementInventory(order.items);
           
           // Clear cart - use order.user from Order document, NOT req.user
           // Flutterwave webhooks do NOT send auth headers
