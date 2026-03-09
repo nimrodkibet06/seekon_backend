@@ -1,5 +1,6 @@
 import Setting from '../models/Setting.js';
-import { sendContactEmail } from '../utils/email.js';
+import Subscriber from '../models/Subscriber.js';
+import { sendContactEmail, sendNewsletterWelcome } from '../utils/email.js';
 
 // Get exchange rate (Public)
 export const getExchangeRate = async (req, res) => {
@@ -141,5 +142,31 @@ export const submitContactForm = async (req, res) => {
     }
   } catch (error) {
     res.status(500).json({ success: false, message: 'Server error processing contact form.' });
+  }
+};
+
+// Subscribe to Newsletter
+export const subscribeNewsletter = async (req, res) => {
+  try {
+    const { email } = req.body;
+    if (!email || !/^\S+@\S+\.\S+$/.test(email)) {
+      return res.status(400).json({ success: false, message: 'Please provide a valid email address.' });
+    }
+    const existing = await Subscriber.findOne({ email });
+    if (existing) {
+      if (existing.status === 'unsubscribed') {
+        existing.status = 'subscribed';
+        await existing.save();
+        return res.status(200).json({ success: true, message: 'Welcome back! You have been re-subscribed.' });
+      }
+      return res.status(400).json({ success: false, message: 'You are already subscribed!' });
+    }
+    await Subscriber.create({ email });
+    // Send the welcome email in the background (don't await it so UI responds faster)
+    sendNewsletterWelcome(email);
+    res.status(201).json({ success: true, message: 'Successfully subscribed! Check your email for a surprise.' });
+  } catch (error) {
+    console.error('Newsletter error:', error);
+    res.status(500).json({ success: false, message: 'Server error. Please try again later.' });
   }
 };

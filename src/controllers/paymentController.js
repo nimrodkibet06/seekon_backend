@@ -356,6 +356,9 @@ export const mpesaCallback = async (req, res) => {
         let order = null;
         try {
           order = await Order.findOne({ mpesaCheckoutRequestId: checkoutRequestID });
+          if (order) {
+            console.log(`📋 Order found: ${order._id}, saving M-Pesa receipt: ${mpesaReceipt}`);
+          }
         } catch (orderError) {
           console.error('⚠️ Error finding order:', orderError.message);
         }

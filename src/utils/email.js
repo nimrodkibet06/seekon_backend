@@ -252,3 +252,34 @@ export const sendContactEmail = async (name, email, subject, message) => {
     return { success: false, message: error.message };
   }
 };
+
+// Send Newsletter Welcome Email
+export const sendNewsletterWelcome = async (email) => {
+  const resend = getResendClient();
+  if (!resend) {
+    console.log(`\n📧 NEWSLETTER WELCOME EMAIL\nTo: ${email}\nCode: SEEKON10\n(Development mode - no email sent)`);
+    return { success: true, development: true };
+  }
+  try {
+    await resend.emails.send({
+      from: 'Seekon Apparel <noreply@seek-on.app>',
+      to: email,
+      subject: 'Welcome to the Seekon Family! 🎉',
+      html: `
+        <div style="font-family: sans-serif; text-align: center; padding: 40px 20px; color: #333;">
+          <h1 style="color: #00A676;">Welcome to Seekon Apparel!</h1>
+          <p style="font-size: 16px; line-height: 1.5;">You're on the list. Get ready for exclusive drops, early access to flash sales, and premium streetwear inspiration.</p>
+          <div style="margin: 30px 0; padding: 20px; background: #f4f4f4; border-radius: 8px;">
+            <p style="margin: 0; font-size: 14px; color: #666;">As a thank you, use this code on your first order:</p>
+            <h2 style="letter-spacing: 2px; color: #111;">SEEKON10</h2>
+          </div>
+          <a href="https://www.seek-on.app/collection" style="background-color: #00A676; color: white; padding: 12px 24px; text-decoration: none; border-radius: 6px; font-weight: bold; display: inline-block;">Shop Now</a>
+        </div>
+      `
+    });
+    return { success: true };
+  } catch (error) {
+    console.error('❌ Error sending welcome email:', error.message);
+    return { success: false };
+  }
+};

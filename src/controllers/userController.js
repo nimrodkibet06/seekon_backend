@@ -1,4 +1,6 @@
 import User from '../models/User.js';
+import Cart from '../models/Cart.js';
+import Order from '../models/Order.js';
 import SystemLog from '../models/SystemLog.js';
 
 // Get All Users
@@ -137,38 +139,74 @@ export const updateUserStatus = async (req, res) => {
   }
 };
 
-// Delete User
+// Delete User - Cascading Hard Delete
+// This deletes the user AND all associated carts and orders
+// to prevent orphaned data from crashing analytics
 export const deleteUser = async (req, res) => {
   try {
     const { id } = req.params;
 
-    const user = await User.findByIdAndDelete(id);
-
-    if (!user) {
-      return res.status(404).json({
-        success: false,
-        message: 'User not found'
+    // 1. Safety Check: Prevent admin from deleting themselves
+    if (req.user && req.user._id.toString() === id) {
+      return res.status(400).json({ 
+        success: false, 
+        message: "You cannot delete your own admin account." 
+      });
+    }
+    
+    // Also check req.admin for admin routes
+    if (req.admin && req.admin._id && req.admin._id.toString() === id) {
+      return res.status(400).json({ 
+        success: false, 
+        message: "You cannot delete your own admin account." 
       });
     }
 
+    const targetUser = await User.findById(id);
+    if (!targetUser) {
+      return res.status(404).json({ success: false, message: "User not found" });
+    }
+
+    // 2. Cascade Delete: Wipe out their carts (Cart uses userId field)
+    const cartsDeleted = await Cart.deleteMany({ userId: id }).catch(e => { 
+      console.log('No carts found for user:', id); 
+      return { deletedCount: 0 }; 
+    });
+    console.log(`🗑️ Deleted ${cartsDeleted.deletedCount || 0} carts for user ${id}`);
+
+    // 3. Cascade Delete: Wipe out their orders (Order uses user field)
+    const ordersDeleted = await Order.deleteMany({ user: id }).catch(e => { 
+      console.log('No orders found for user:', id); 
+      return { deletedCount: 0 }; 
+    });
+    console.log(`🗑️ Deleted ${ordersDeleted.deletedCount || 0} orders for user ${id}`);
+
+    // 4. Finally, Hard Delete the User
+    await User.findByIdAndDelete(id);
+    console.log(`🗑️ User ${id} permanently deleted`);
+
     // Log action
     await SystemLog.create({
-      action: 'user_deleted',
+      action: 'user_deleted_cascade',
       actor: req.admin?.email || 'system',
       actorType: 'admin',
-      details: { userId: id },
+      details: { 
+        userId: id, 
+        cartsDeleted: cartsDeleted.deletedCount || 0,
+        ordersDeleted: ordersDeleted.deletedCount || 0
+      },
       module: 'user'
     });
 
-    res.status(200).json({
-      success: true,
-      message: 'User deleted successfully'
+    res.status(200).json({ 
+      success: true, 
+      message: "User and all associated test data have been permanently deleted." 
     });
   } catch (error) {
-    console.error('Error deleting user:', error);
+    console.error('Error hard-deleting user:', error);
     res.status(500).json({
       success: false,
-      message: 'Failed to delete user'
+      message: 'Failed to delete user: ' + error.message
     });
   }
 };
