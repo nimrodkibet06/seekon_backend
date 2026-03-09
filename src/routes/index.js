@@ -8,6 +8,7 @@ import adminRoutes from './adminRoutes.js';
 import notificationRoutes from './notificationRoutes.js';
 import orderRoutes from './orderRoutes.js';
 import productRoutes from './productRoutes.js';
+import aiRoutes from './aiRoutes.js';
 import { 
   getAllProducts as getAllProductsPublic, 
   getProduct as getProductPublic 
@@ -26,6 +27,7 @@ router.use('/admin', adminRoutes);
 router.use('/notifications', notificationRoutes);
 router.use('/orders', orderRoutes);
 router.use('/products', productRoutes);
+router.use('/ai', aiRoutes);
 
 // Public product routes (no auth required for viewing)
 // Note: Individual product routes are handled by productRoutes.js

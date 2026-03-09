@@ -30,7 +30,8 @@ const OPTIONAL_VARS = [
   { key: 'CLOUDINARY_CLOUD_NAME', name: 'Cloudinary Cloud Name', description: 'Cloud storage for image uploads' },
   { key: 'CLOUDINARY_API_KEY', name: 'Cloudinary API Key', description: 'API key for Cloudinary' },
   { key: 'CLOUDINARY_API_SECRET', name: 'Cloudinary API Secret', description: 'API secret for Cloudinary' },
-  { key: 'RESEND_API_KEY', name: 'Resend API Key', description: 'API key for Resend email service' }
+  { key: 'RESEND_API_KEY', name: 'Resend API Key', description: 'API key for Resend email service' },
+  { key: 'GEMINI_API_KEY', name: 'Gemini AI API Key', description: 'API key for Seekon AI Shopping Assistant' }
 ];
 
 /**
@@ -99,7 +100,8 @@ export const isServiceConfigured = (serviceName) => {
     email: ['EMAIL_USER', 'EMAIL_PASS'],
     resend: ['RESEND_API_KEY'],
     mongodb: ['MONGO_URI'],
-    jwt: ['JWT_SECRET']
+    jwt: ['JWT_SECRET'],
+    gemini: ['GEMINI_API_KEY']
   };
   
   const keys = serviceKeys[serviceName];
