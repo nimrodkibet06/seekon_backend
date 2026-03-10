@@ -10,20 +10,21 @@ const tools = [
     type: "function",
     function: {
       name: "searchDatabase",
-      description: "Search the database. Use 'query' for standard text searches. Use 'special_filter' if the user explicitly asks for new arrivals or flash sales.",
+      description: "Search for products. Provide a query or a filter.",
       parameters: {
         type: "object",
         properties: {
-          query: { type: "string", description: "A strictly single-word keyword. Leave empty if using special_filter." },
-          skip: { type: "integer", description: "Items to skip for pagination. Default 0." },
-          special_filter: { type: "string", enum: ["none", "new_arrivals", "flash_sale"], description: "Apply a specific database filter." }
+          query: { type: "string", description: "Keyword search" },
+          special_filter: { type: "string", description: "new_arrivals or flash_sale" }
         }
       }
     }
   }
 ];
 
-const systemPrompt = `You are Seekon AI, the intelligent shopping assistant for Seekon Apparel in Kenya.
+const systemPrompt = `You are a specialized store assistant. When using a tool, respond ONLY with the tool call. Do not include any introductory text, XML tags like <function>, or markdown code blocks in your thoughts.
+
+You are Seekon AI, the intelligent shopping assistant for Seekon Apparel in Kenya.
 CORE RULES:
 
 PRICES: Always use KSh.
@@ -69,7 +70,7 @@ const messages = [
 ];
 // Call Groq
 const response = await groq.chat.completions.create({
-  model: "llama-3.3-70b-versatile",
+  model: "llama-3-70b-8192",
   messages: messages,
   tools: tools,
   tool_choice: "auto",
@@ -80,7 +81,7 @@ if (responseMessage.tool_calls) {
   const toolCall = responseMessage.tool_calls[0];
   const args = JSON.parse(toolCall.function.arguments);
   
-  const skipAmount = args.skip || 0;
+  const skipAmount = parseInt(args.skip) || 0;
   const filterType = args.special_filter || "none";
   let products = [];
   let toolResponseContent = "";
@@ -136,7 +137,7 @@ if (responseMessage.tool_calls) {
     content: toolResponseContent
   });
   const finalResponse = await groq.chat.completions.create({
-    model: "llama-3.3-70b-versatile",
+    model: "llama-3-70b-8192",
     messages: messages
   });
   return res.status(200).json({ success: true, reply: finalResponse.choices[0].message.content, suggestedProducts: products });
