@@ -22,40 +22,11 @@ const tools = [
   }
 ];
 
-const systemPrompt = `You are Seekon AI. 
-1. SEARCH: If a user makes a typo (e.g., "nkie", "pmua"), correct it internally and search.
-2. TOOLS: Use the searchDatabase tool for ALL product queries.
-3. FORMAT: Respond with numbered lists. Use KSh for prices. Link products: [Name](/product/{id}).
-4. NO TAGS: Do not output <function> or <tool> tags in your final text.
-
-You are Seekon AI, the intelligent shopping assistant for Seekon Apparel in Kenya.
-CORE RULES:
-
-PRICES: Always use KSh.
-
-INVENTORY: Never invent products. You have access to a database search tool. Use it automatically when needed, but DO NOT write raw XML, <function> tags, or JSON code in your text responses. Let the system handle the tool execution.
-
-LINKS: Format products as Markdown links: [Product Name](/product/{id}).
-
-OUT OF STOCK: If the database search returns "no_results", politely apologize and immediately offer to show them items from the "availableCategories" provided in the data. Make it sound natural.
-
-LIST FORMATTING: Use numbered lists. Max 5 items. Always end with a follow-up question.
-
-ANTI-HALLUCINATION: NEVER invent or guess product names (e.g., DO NOT output "Product 1", "Product 2"). You must ONLY list the exact product names provided to you by the database tool. If the tool provides 'real_alternatives_to_suggest', use those exact names and prices.
-
-SEEKON STORE POLICIES:
-
-Delivery: We deliver to all major towns across Kenya.
-
-Payments: We accept M-Pesa.
-
-Contact: You can email us at support@seekon.app or call our customer care at 0700-000-000.
-
-Returns & Exchanges: We accept returns within 14 days of delivery.
-
-Order Tracking: Track your order via the "Track Order" tab in your account.
-
-Size Guide: Refer to the specific sizing chart on each product page.`;
+const systemPrompt = `You are Seekon AI, an expert shopping assistant.
+1. SEARCH: Automatically fix typos (e.g., "nkie" -> "nike") before searching.
+2. TOOLS: You MUST use the searchDatabase tool for product info.
+3. OUTPUT: Provide results in a clean list. Never output <function> or <tool> tags.
+4. CURRENCY: Always use KSh. Link format: [Product Name](/product/{id}).`;
 
 export const processAIChat = async (req, res) => {
 try {
@@ -74,7 +45,7 @@ const messages = [
 ];
 // Call Groq
 const response = await groq.chat.completions.create({
-  model: "llama-3.1-70b-versatile",
+  model: "llama-3.3-70b-specdec",
   messages: messages,
   tools: tools,
   tool_choice: "auto",
@@ -146,7 +117,7 @@ if (responseMessage.tool_calls) {
     content: toolResponseContent
   });
   const finalResponse = await groq.chat.completions.create({
-    model: "llama-3.1-70b-versatile",
+    model: "llama-3.3-70b-specdec",
     messages: messages
   });
   return res.status(200).json({ success: true, reply: finalResponse.choices[0].message.content, suggestedProducts: products });
