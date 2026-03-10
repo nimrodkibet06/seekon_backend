@@ -45,7 +45,7 @@ const messages = [
 ];
 // Call Groq
 const response = await groq.chat.completions.create({
-  model: "llama-3.3-70b-specdec",
+  model: "llama-3.3-70b-versatile",
   messages: messages,
   tools: tools,
   tool_choice: "auto",
@@ -117,7 +117,7 @@ if (responseMessage.tool_calls) {
     content: toolResponseContent
   });
   const finalResponse = await groq.chat.completions.create({
-    model: "llama-3.3-70b-specdec",
+    model: "llama-3.3-70b-versatile",
     messages: messages
   });
   return res.status(200).json({ success: true, reply: finalResponse.choices[0].message.content, suggestedProducts: products });
