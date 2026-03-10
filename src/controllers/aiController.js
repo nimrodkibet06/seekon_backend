@@ -22,7 +22,7 @@ const searchDatabaseTool = {
 
 // Configure the model with its persona and tools
 const model = genAI.getGenerativeModel({
-  model: "gemini-2.5-flash",
+  model: "gemini-2.5-flash-lite",
   systemInstruction: `You are Seekon AI, the intelligent and stylish shopping assistant for Seekon Apparel in Kenya. 
 CORE RULES:
 
