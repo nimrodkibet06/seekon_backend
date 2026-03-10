@@ -1,4 +1,5 @@
 import Transaction from '../models/Transaction.js';
+import Order from '../models/Order.js';
 import Admin from '../models/Admin.js';
 import User from '../models/User.js';
 import Product from '../models/Product.js';
@@ -472,9 +473,49 @@ export const getTransaction = async (req, res) => {
       });
     }
 
+    // Find associated order by paymentId
+    const order = await Order.findOne({ paymentId: id })
+      .populate('items.product', 'name image price');
+
+    // Extract M-Pesa receipt number from callback data
+    let mpesaReceiptNumber = null;
+    let transactionDate = null;
+    
+    if (transaction.callbackData) {
+      const callback = transaction.callbackData;
+      mpesaReceiptNumber = callback.Body?.stkCallback?.MpesaReceiptNumber 
+        || callback.MpesaReceiptNumber 
+        || callback.mpesaReceiptNumber
+        || null;
+      
+      // Get timestamp from callback
+      const callbackTime = callback.Body?.stkCallback?.TransactionDate 
+        || callback.TransactionDate 
+        || null;
+      
+      if (callbackTime) {
+        // Format: YYYYMMDDHHmmss
+        const year = callbackTime.toString().substring(0, 4);
+        const month = callbackTime.toString().substring(4, 6);
+        const day = callbackTime.toString().substring(6, 8);
+        const hour = callbackTime.toString().substring(8, 10);
+        const minute = callbackTime.toString().substring(10, 12);
+        const second = callbackTime.toString().substring(12, 14);
+        transactionDate = new Date(`${year}-${month}-${day}T${hour}:${minute}:${second}`);
+      }
+    }
+
+    // If no callback data, use transaction's createdAt
+    if (!transactionDate) {
+      transactionDate = transaction.createdAt;
+    }
+
     res.status(200).json({
       success: true,
-      transaction
+      transaction,
+      order,
+      mpesaReceiptNumber,
+      transactionDate
     });
   } catch (error) {
     console.error('Error fetching transaction:', error);
