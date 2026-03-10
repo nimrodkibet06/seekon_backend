@@ -22,7 +22,11 @@ const tools = [
   }
 ];
 
-const systemPrompt = `You are a specialized store assistant. When using a tool, respond ONLY with the tool call. Do not include any introductory text, XML tags like <function>, or markdown code blocks in your thoughts.
+const systemPrompt = `You are Seekon AI. 
+1. SEARCH: If a user makes a typo (e.g., "nkie", "pmua"), correct it internally and search.
+2. TOOLS: Use the searchDatabase tool for ALL product queries.
+3. FORMAT: Respond with numbered lists. Use KSh for prices. Link products: [Name](/product/{id}).
+4. NO TAGS: Do not output <function> or <tool> tags in your final text.
 
 You are Seekon AI, the intelligent shopping assistant for Seekon Apparel in Kenya.
 CORE RULES:
@@ -70,7 +74,7 @@ const messages = [
 ];
 // Call Groq
 const response = await groq.chat.completions.create({
-  model: "llama-3-70b-8192",
+  model: "llama-3.1-70b-versatile",
   messages: messages,
   tools: tools,
   tool_choice: "auto",
@@ -96,12 +100,17 @@ if (responseMessage.tool_calls) {
     // Query for flash sale items based on schema
     products = await Product.find({ isFlashSale: true }).skip(skipAmount).limit(5); 
   } else if (args.query) {
-    // Standard Text Search
+    // Fuzzy Search - handles typos by creating a flexible pattern
+    const rawQuery = args.query || "";
+    // This creates a fuzzy pattern: "Nkie" -> "N.*k.*i.*e"
+    const fuzzyPattern = rawQuery.split('').join('.*');
+    
+    // Standard Text Search with fuzzy matching
     products = await Product.find({
       $or: [
-        { name: { $regex: args.query, $options: 'i' } },
-        { brand: { $regex: args.query, $options: 'i' } },
-        { category: { $regex: args.query, $options: 'i' } }
+        { name: { $regex: fuzzyPattern, $options: 'i' } },
+        { brand: { $regex: fuzzyPattern, $options: 'i' } },
+        { tags: { $regex: fuzzyPattern, $options: 'i' } }
       ]
     }).skip(skipAmount).limit(5);
   }
@@ -137,7 +146,7 @@ if (responseMessage.tool_calls) {
     content: toolResponseContent
   });
   const finalResponse = await groq.chat.completions.create({
-    model: "llama-3-70b-8192",
+    model: "llama-3.1-70b-versatile",
     messages: messages
   });
   return res.status(200).json({ success: true, reply: finalResponse.choices[0].message.content, suggestedProducts: products });
