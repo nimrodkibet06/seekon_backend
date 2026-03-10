@@ -1,5 +1,6 @@
 import Groq from 'groq-sdk';
 import Product from '../models/Product.js';
+import Setting from '../models/Setting.js';
 
 const groq = new Groq({ apiKey: process.env.GROQ_API_KEY });
 
@@ -9,14 +10,14 @@ const tools = [
     type: "function",
     function: {
       name: "searchDatabase",
-      description: "Search the Seekon Apparel database for products. IMPORTANT: You must extract and provide ONLY ONE single keyword.",
+      description: "Search the database. Use 'query' for standard text searches. Use 'special_filter' if the user explicitly asks for new arrivals or flash sales.",
       parameters: {
         type: "object",
         properties: {
-          query: { type: "string", description: "A STRICTLY SINGLE-WORD keyword (e.g., 'Nike', 'sneakers')." },
-          skip: { type: "integer", description: "The number of products to skip. Default is 0. If the user asks for 'more' or 'other options', set this to 5. If they ask again, set to 10." }
-        },
-        required: ["query"]
+          query: { type: "string", description: "A strictly single-word keyword. Leave empty if using special_filter." },
+          skip: { type: "integer", description: "Items to skip for pagination. Default 0." },
+          special_filter: { type: "string", enum: ["none", "new_arrivals", "flash_sale"], description: "Apply a specific database filter." }
+        }
       }
     }
   }
@@ -34,6 +35,8 @@ LINKS: Format products as Markdown links: [Product Name](/product/{id}).
 OUT OF STOCK: If the database search returns "no_results", politely apologize and immediately offer to show them items from the "availableCategories" provided in the data. Make it sound natural.
 
 LIST FORMATTING: Use numbered lists. Max 5 items. Always end with a follow-up question.
+
+ANTI-HALLUCINATION: NEVER invent or guess product names (e.g., DO NOT output "Product 1", "Product 2"). You must ONLY list the exact product names provided to you by the database tool. If the tool provides 'real_alternatives_to_suggest', use those exact names and prices.
 
 SEEKON STORE POLICIES:
 
@@ -78,23 +81,59 @@ if (responseMessage.tool_calls) {
   const args = JSON.parse(toolCall.function.arguments);
   
   const skipAmount = args.skip || 0;
-  console.log(`🤖 Groq AI is searching DB for: ${args.query} | Skipping: ${skipAmount}`);
-  const products = await Product.find({
-    $or: [
-      { name: { $regex: args.query, $options: 'i' } },
-      { brand: { $regex: args.query, $options: 'i' } },
-      { category: { $regex: args.query, $options: 'i' } }
-    ]
-  }).skip(skipAmount).limit(5);
-  const formattedInventory = products.map(p => ({
-    id: p._id, name: p.name, price: `KSh ${p.price}`, stock: p.stock > 0 ? 'In Stock' : 'Out of Stock'
-  }));
+  const filterType = args.special_filter || "none";
+  let products = [];
+  let toolResponseContent = "";
+  
+  console.log(`🤖 Groq AI DB Search -> Query: ${args.query} | Filter: ${filterType}`);
+  
+  // Handle the specific queries
+  if (filterType === "new_arrivals") {
+    // Sort by newest created
+    products = await Product.find({}).sort({ createdAt: -1 }).skip(skipAmount).limit(5);
+  } else if (filterType === "flash_sale") {
+    // Query for flash sale items based on schema
+    products = await Product.find({ isFlashSale: true }).skip(skipAmount).limit(5); 
+  } else if (args.query) {
+    // Standard Text Search
+    products = await Product.find({
+      $or: [
+        { name: { $regex: args.query, $options: 'i' } },
+        { brand: { $regex: args.query, $options: 'i' } },
+        { category: { $regex: args.query, $options: 'i' } }
+      ]
+    }).skip(skipAmount).limit(5);
+  }
+  
+  // Handle Results & Fallbacks
+  if (products.length === 0) {
+    if (filterType === "flash_sale") {
+       toolResponseContent = JSON.stringify({ status: "no_flash_sale", message: "There are no flash sales currently active." });
+    } else {
+       // Fallback: Give REAL products to suggest instead of hallucinating
+       const realAlternativeProducts = await Product.find({}).limit(3);
+       const formattedAlts = realAlternativeProducts.map(p => ({
+         id: p._id, name: p.name, price: `KSh ${p.price}`
+       }));
+       toolResponseContent = JSON.stringify({
+         status: "no_results", 
+         message: "Requested items not found.",
+         real_alternatives_to_suggest: formattedAlts
+       });
+    }
+  } else {
+    const formattedInventory = products.map(p => ({
+      id: p._id, name: p.name, price: `KSh ${p.price}`, stock: p.stock > 0 ? 'In Stock' : 'Out of Stock'
+    }));
+    toolResponseContent = JSON.stringify(formattedInventory);
+  }
+  
   // Send DB results back to Groq
   messages.push(responseMessage); // append AI's tool request
   messages.push({
     role: "tool",
     tool_call_id: toolCall.id,
-    content: JSON.stringify(formattedInventory)
+    content: toolResponseContent
   });
   const finalResponse = await groq.chat.completions.create({
     model: "llama-3.3-70b-versatile",
