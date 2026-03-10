@@ -7,13 +7,13 @@ const genAI = new GoogleGenerativeAI(process.env.GEMINI_API_KEY);
 // Define the tool that Gemini can use to search MongoDB
 const searchDatabaseTool = {
   name: "searchDatabase",
-  description: "Search the Seekon Apparel database for products. Use this whenever a user asks to see specific shoes, clothes, brands, or categories.",
+  description: "Search the Seekon Apparel database for products. IMPORTANT: You must extract and provide ONLY ONE single keyword. If the user asks for 'Nike shoes', your query MUST be exactly 'Nike'. If they ask for 'black hoodies', query 'hoodie'. Never use multiple words.",
   parameters: {
     type: "object",
     properties: {
       query: {
         type: "string",
-        description: "The main search keyword, e.g., 'Nike', 'sneakers', 'hoodie', 'red'"
+        description: "A STRICTLY SINGLE-WORD keyword (e.g., 'Nike', 'sneakers', 'hoodie'). Never send two words."
       }
     },
     required: ["query"]
