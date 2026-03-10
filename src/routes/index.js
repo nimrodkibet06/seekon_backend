@@ -9,6 +9,7 @@ import notificationRoutes from './notificationRoutes.js';
 import orderRoutes from './orderRoutes.js';
 import productRoutes from './productRoutes.js';
 import aiRoutes from './aiRoutes.js';
+console.log("Mounting AI routes to /ai...");
 import { 
   getAllProducts as getAllProductsPublic, 
   getProduct as getProductPublic 
