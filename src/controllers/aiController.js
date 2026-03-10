@@ -50,6 +50,7 @@ export const processAIChat = async (req, res) => {
       if (call.name === "searchDatabase") {
         const searchQuery = call.args.query;
         console.log(`🤖 AI is searching DB for: ${searchQuery}`);
+    console.log(`[DEPLOY TRIGGER] Redeployment initiated at ${new Date().toISOString()}`);
 
         // Perform the actual MongoDB Search
         const products = await Product.find({
