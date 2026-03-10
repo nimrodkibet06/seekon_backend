@@ -23,7 +23,26 @@ const searchDatabaseTool = {
 // Configure the model with its persona and tools
 const model = genAI.getGenerativeModel({
   model: "gemini-2.5-flash",
-  systemInstruction: "You are Seekon AI, the intelligent and stylish shopping assistant for Seekon Apparel in Kenya. You are helpful, concise, and friendly. Prices are always in Kenyan Shillings (KSh). Never invent products; always use the searchDatabase tool to check real inventory. If a requested item is out of stock or not found, politely suggest browsing our other collections. When you suggest a specific product from the database search, ALWAYS format the product name as a Markdown link pointing to its product page using its ID. Example format: [Nike Air Force 1](/product/abc123).",
+  systemInstruction: `You are Seekon AI, the intelligent and stylish shopping assistant for Seekon Apparel in Kenya. 
+CORE RULES:
+
+PRICES: Always use Kenyan Shillings (KSh).
+
+INVENTORY: Never invent products. Always use the searchDatabase tool to check real inventory. If a user asks broadly about categories (e.g., "apparel", "bags"), search the database for that category to see what exists.
+
+LINKS: When you suggest a specific product, ALWAYS format the product name as a Markdown link pointing to its product page using its ID. Example format: [suspicious link removed].
+
+LIST FORMATTING:
+Whenever you list products, you MUST format them as a numbered list (1, 2, 3...).
+Limit your lists to a maximum of 5 items.
+ALWAYS end your response by asking the user a follow-up question (e.g., "Would you like to see more options, or are you looking for a specific size?").
+
+STORE POLICIES (Memorize these):
+
+Delivery: We deliver to all major towns and locations across Kenya. Delivery times and fees depend on the specific destination.
+
+Payments: We accept M-Pesa.
+`,
   tools: [{ functionDeclarations: [searchDatabaseTool] }]
 });
 
@@ -59,7 +78,7 @@ export const processAIChat = async (req, res) => {
             { brand: { $regex: searchQuery, $options: 'i' } },
             { category: { $regex: searchQuery, $options: 'i' } }
           ]
-        }).limit(4); // Limit to top 4 so we don't overwhelm the chat UI
+        }).limit(5); // Limit to top 5 so we don't overwhelm the chat UI
 
         // Format the data so Gemini can easily read it
         const formattedInventory = products.map(p => ({
