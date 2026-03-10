@@ -5,33 +5,43 @@ const groq = new Groq({ apiKey: process.env.GROQ_API_KEY });
 
 // 1. Define the Tool using Groq/OpenAI syntax
 const tools = [
-{
-type: "function",
-function: {
-name: "searchDatabase",
-description: "Search the Seekon Apparel database for products. IMPORTANT: You must extract and provide ONLY ONE single keyword. If the user asks for 'Nike shoes', your query MUST be exactly 'Nike'.",
-parameters: {
-type: "object",
-properties: {
-query: { type: "string", description: "A STRICTLY SINGLE-WORD keyword (e.g., 'Nike', 'sneakers')." }
-},
-required: ["query"]
-}
-}
-}
+  {
+    type: "function",
+    function: {
+      name: "searchDatabase",
+      description: "Search the Seekon Apparel database for products. IMPORTANT: You must extract and provide ONLY ONE single keyword.",
+      parameters: {
+        type: "object",
+        properties: {
+          query: { type: "string", description: "A STRICTLY SINGLE-WORD keyword (e.g., 'Nike', 'sneakers')." },
+          skip: { type: "integer", description: "The number of products to skip. Default is 0. If the user asks for 'more' or 'other options', set this to 5. If they ask again, set to 10." }
+        },
+        required: ["query"]
+      }
+    }
+  }
 ];
 
 const systemPrompt = `You are Seekon AI, the intelligent shopping assistant for Seekon Apparel in Kenya.
 CORE RULES:
-
-PRICES: Always use KSh.
-
-INVENTORY: Never invent products. Always use the searchDatabase tool.
-
-LINKS: Format products as Markdown links: [product name](/product/id).
-
+1. PRICES: Always use KSh.
+2. INVENTORY: Never invent products. Always use the searchDatabase tool. If a user asks for "more", use the tool again with the skip parameter set to 5.
+3. LINKS: Format products as Markdown links: [Product Name](/product/{id}).
 LIST FORMATTING: Use numbered lists. Max 5 items. Always end with a follow-up question.
-STORE POLICIES: We deliver across Kenya. We accept M-Pesa.`;
+
+SEEKON STORE POLICIES (Memorize these and provide them when asked):
+
+Delivery: We deliver to all major towns across Kenya.
+
+Payments: We accept M-Pesa.
+
+Contact: You can email us at seekonapparel77@gmail.com or call our customer care at +254 727 672 772.
+
+Returns & Exchanges: We accept returns within 14 days of delivery. Items must be unworn and in original condition.
+
+Order Tracking: You can track your order by clicking the "Track Order" tab in your account dashboard.
+
+Size Guide: Our apparel runs true to size. Please refer to the specific sizing chart on each product page.`;
 
 export const processAIChat = async (req, res) => {
 try {
@@ -61,14 +71,15 @@ if (responseMessage.tool_calls) {
   const toolCall = responseMessage.tool_calls[0];
   const args = JSON.parse(toolCall.function.arguments);
   
-  console.log(`🤖 Groq AI is searching DB for: ${args.query}`);
+  const skipAmount = args.skip || 0;
+  console.log(`🤖 Groq AI is searching DB for: ${args.query} | Skipping: ${skipAmount}`);
   const products = await Product.find({
     $or: [
       { name: { $regex: args.query, $options: 'i' } },
       { brand: { $regex: args.query, $options: 'i' } },
       { category: { $regex: args.query, $options: 'i' } }
     ]
-  }).limit(5);
+  }).skip(skipAmount).limit(5);
   const formattedInventory = products.map(p => ({
     id: p._id, name: p.name, price: `KSh ${p.price}`, stock: p.stock > 0 ? 'In Stock' : 'Out of Stock'
   }));
