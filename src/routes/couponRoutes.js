@@ -1,6 +1,5 @@
-const express = require('express');
-const router = express.Router();
-const { 
+import express from 'express';
+import { 
   getCoupons, 
   createCoupon, 
   updateCoupon, 
@@ -8,20 +7,22 @@ const {
   toggleCouponStatus,
   applyCoupon,
   incrementCouponUsage 
-} = require('../controllers/couponController');
-const { protect, admin } = require('../middleware/authMiddleware');
+} from '../controllers/couponController.js';
+import { authMiddleware, adminMiddleware } from '../middleware/auth.js';
+
+const router = express.Router();
 
 // Public route - Apply coupon
 router.post('/apply', applyCoupon);
 
 // Protected route - Increment usage (called after successful payment)
-router.post('/:code/used', protect, incrementCouponUsage);
+router.post('/:code/used', authMiddleware, incrementCouponUsage);
 
 // Admin routes - All protected by admin middleware
-router.get('/', protect, admin, getCoupons);
-router.post('/', protect, admin, createCoupon);
-router.put('/:id', protect, admin, updateCoupon);
-router.delete('/:id', protect, admin, deleteCoupon);
-router.patch('/:id/toggle', protect, admin, toggleCouponStatus);
+router.get('/', authMiddleware, adminMiddleware, getCoupons);
+router.post('/', authMiddleware, adminMiddleware, createCoupon);
+router.put('/:id', authMiddleware, adminMiddleware, updateCoupon);
+router.delete('/:id', authMiddleware, adminMiddleware, deleteCoupon);
+router.patch('/:id/toggle', authMiddleware, adminMiddleware, toggleCouponStatus);
 
-module.exports = router;
+export default router;

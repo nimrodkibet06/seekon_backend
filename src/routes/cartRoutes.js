@@ -6,13 +6,13 @@ import {
   removeFromCart,
   clearCart
 } from '../controllers/cartController.js';
-import { protect } from '../middleware/authMiddleware.js'; 
+import { authMiddleware } from '../middleware/auth.js'; 
 
 const router = express.Router();
 
 // SECURITY: All cart routes require authentication
 // The protect middleware verifies JWT token and sets req.user
-router.use(protect);
+router.use(authMiddleware);
 
 router.get('/', getCart);                           // GET /api/cart
 router.post('/add', addToCart);                     // POST /api/cart/add

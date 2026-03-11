@@ -1,4 +1,4 @@
-const mongoose = require('mongoose');
+import mongoose from 'mongoose';
 
 const couponSchema = new mongoose.Schema({
   code: {
@@ -59,4 +59,6 @@ const couponSchema = new mongoose.Schema({
 couponSchema.index({ code: 1 });
 couponSchema.index({ isActive: 1, expiryDate: 1 });
 
-module.exports = mongoose.model('Coupon', couponSchema);
+const Coupon = mongoose.model('Coupon', couponSchema);
+
+export default Coupon;

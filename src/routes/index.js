@@ -10,12 +10,6 @@ import orderRoutes from './orderRoutes.js';
 import productRoutes from './productRoutes.js';
 import aiRoutes from './aiRoutes.js';
 import couponRoutes from './couponRoutes.js';
-console.log("Mounting AI routes to /ai...");
-import { 
-  getAllProducts as getAllProductsPublic, 
-  getProduct as getProductPublic 
-} from '../controllers/productController.js';
-import { getOrder } from '../controllers/orderController.js';
 
 const router = express.Router();
 
@@ -32,14 +26,4 @@ router.use('/products', productRoutes);
 router.use('/ai', aiRoutes);
 router.use('/coupons', couponRoutes);
 
-// Public product routes (no auth required for viewing)
-// Note: Individual product routes are handled by productRoutes.js
-// This is just a fallback for public GET
-router.get('/products', getAllProductsPublic);
-router.get('/products/:id', getProductPublic);
-
-// Public order lookup for payment polling (no auth required)
-router.get('/orders/:id', getOrder);
-
 export default router;
-
