@@ -9,6 +9,7 @@ import notificationRoutes from './notificationRoutes.js';
 import orderRoutes from './orderRoutes.js';
 import productRoutes from './productRoutes.js';
 import aiRoutes from './aiRoutes.js';
+import couponRoutes from './couponRoutes.js';
 console.log("Mounting AI routes to /ai...");
 import { 
   getAllProducts as getAllProductsPublic, 
@@ -29,6 +30,7 @@ router.use('/notifications', notificationRoutes);
 router.use('/orders', orderRoutes);
 router.use('/products', productRoutes);
 router.use('/ai', aiRoutes);
+router.use('/coupons', couponRoutes);
 
 // Public product routes (no auth required for viewing)
 // Note: Individual product routes are handled by productRoutes.js

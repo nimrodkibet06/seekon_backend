@@ -21,6 +21,7 @@ const stkLimiter = rateLimit({
 
 // All payment routes except callbacks require authentication
 router.post('/mpesa', authMiddleware, stkLimiter, initiateMpesaPayment);
+router.post('/stk-push', authMiddleware, stkLimiter, initiateMpesaPayment); // Alias for frontend compatibility
 router.post('/mpesa/query', authMiddleware, queryMpesaTransaction);
 router.post('/flutterwave', authMiddleware, initiateFlutterwavePayment);
 

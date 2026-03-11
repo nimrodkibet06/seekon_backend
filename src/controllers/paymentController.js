@@ -3,6 +3,7 @@ import Order from '../models/Order.js';
 import Cart from '../models/Cart.js';
 import Notification from '../models/Notification.js';
 import Product from '../models/Product.js';
+import Coupon from '../models/Coupon.js';
 import crypto from 'crypto';
 import axios from 'axios';
 
@@ -155,6 +156,48 @@ export const initiateMpesaPayment = async (req, res) => {
         // Fall back to frontend amount if calculation fails
       }
     }
+
+    // COUPON: Validate and apply coupon if provided
+    let couponDiscount = 0;
+    const { couponCode } = req.body;
+    if (couponCode && rawAmount > 0) {
+      try {
+        const coupon = await Coupon.findOne({ code: couponCode.toUpperCase() });
+        
+        if (coupon) {
+          // Validate coupon
+          if (!coupon.isActive) {
+            console.log('⚠️ Coupon is inactive:', couponCode);
+          } else if (new Date(coupon.expiryDate) < new Date()) {
+            console.log('⚠️ Coupon has expired:', couponCode);
+          } else if (coupon.usedCount >= coupon.usageLimit) {
+            console.log('⚠️ Coupon usage limit reached:', couponCode);
+          } else {
+            // Calculate discount
+            if (coupon.discountType === 'percentage') {
+              couponDiscount = (rawAmount * coupon.discountValue) / 100;
+              if (coupon.maxDiscountAmount && couponDiscount > coupon.maxDiscountAmount) {
+                couponDiscount = coupon.maxDiscountAmount;
+              }
+            } else {
+              couponDiscount = coupon.discountValue;
+              if (couponDiscount > rawAmount) {
+                couponDiscount = rawAmount;
+              }
+            }
+            console.log('🎟️ Coupon applied:', couponCode, 'Discount:', couponDiscount);
+          }
+        } else {
+          console.log('⚠️ Coupon not found:', couponCode);
+        }
+      } catch (couponError) {
+        console.error('⚠️ Error validating coupon:', couponError.message);
+      }
+    }
+
+    // Apply discount
+    rawAmount = rawAmount - couponDiscount;
+    console.log('🔒 Final amount after discount:', rawAmount);
 
     if (!rawAmount) {
       return res.status(400).json({
