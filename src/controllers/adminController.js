@@ -3,7 +3,6 @@ import Order from '../models/Order.js';
 import Admin from '../models/Admin.js';
 import User from '../models/User.js';
 import Product from '../models/Product.js';
-import Order from '../models/Order.js';
 import jwt from 'jsonwebtoken';
 
 const JWT_SECRET = process.env.JWT_SECRET || 'seekon_secret_key';
