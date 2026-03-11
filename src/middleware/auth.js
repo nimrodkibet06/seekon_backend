@@ -35,8 +35,12 @@ export const authMiddleware = (req, res, next) => {
     const decoded = jwt.verify(token, process.env.JWT_SECRET);
     console.log('✅ Token decoded successfully:', decoded);
     
-    // Attach user info to request
-    req.user = decoded;
+    // Map userId to _id for backward compatibility with controllers expecting _id
+    req.user = {
+      ...decoded,
+      _id: decoded.userId || decoded._id
+    };
+    console.log('✅ req.user set:', req.user);
     next();
   } catch (error) {
     console.error('❌ Token verification failed:', error.message);
