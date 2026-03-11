@@ -1,6 +1,6 @@
 import jwt from 'jsonwebtoken';
 import User from '../models/User.js';
-import { sendVerificationEmail, sendPasswordResetEmail, sendOTPEmail } from '../utils/email.js';
+import { sendVerificationEmail, sendPasswordResetEmail, sendOTPEmail, sendWelcomeEmail } from '../utils/email.js';
 import crypto from 'crypto';
 
 /**
@@ -193,6 +193,11 @@ export const register = async (req, res) => {
       email,
       password,
       isVerified: true
+    });
+
+    // Send welcome email (async - don't wait for it to complete)
+    sendWelcomeEmail(name, email).catch(err => {
+      console.error('Failed to send welcome email:', err.message);
     });
 
     // Generate token

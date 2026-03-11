@@ -283,3 +283,114 @@ export const sendNewsletterWelcome = async (email) => {
     return { success: false };
   }
 };
+
+/**
+ * Send welcome email to new registered users
+ * @param {string} name - User's name
+ * @param {string} email - User's email address
+ */
+export const sendWelcomeEmail = async (name, email) => {
+  const frontendUrl = process.env.FRONTEND_URL || 'https://www.seek-on.app';
+  
+  // Try to get Resend client
+  const resend = getResendClient();
+  
+  // Development mode - log to console if no client
+  if (!resend) {
+    console.log(`\n📧 WELCOME EMAIL (Development)\nTo: ${email}\nName: ${name}\nPromo Code: WELCOME500\n`);
+    return { 
+      success: true, 
+      message: 'Welcome email logged to console (check server logs)',
+      development: true
+    };
+  }
+
+  try {
+    const data = await resend.emails.send({
+      from: 'Seekon Apparel <noreply@seek-on.app>',
+      to: email,
+      subject: 'Welcome to Seekon! 🎉 Your Exclusive Welcome Gift Inside!',
+      html: `
+        <!DOCTYPE html>
+        <html>
+        <head>
+          <meta charset="utf-8">
+          <meta name="viewport" content="width=device-width, initial-scale=1.0">
+        </head>
+        <body style="font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Oxygen, Ubuntu, sans-serif; line-height: 1.6; color: #333; max-width: 600px; margin: 0 auto; padding: 20px;">
+          
+          <!-- Header with Logo -->
+          <div style="text-align: center; margin-bottom: 30px;">
+            <h1 style="color: #2563eb; margin: 0; font-size: 32px;">SEEKON</h1>
+            <p style="color: #666; margin: 5px 0 0 0; font-size: 14px;">Premium Fashion & Footwear</p>
+          </div>
+          
+          <!-- Main Content -->
+          <div style="background: #f9fafb; border-radius: 12px; padding: 30px; text-align: center;">
+            <h2 style="color: #111; margin: 0 0 20px 0; font-size: 24px;">Welcome to Seekon, ${name.split(' ')[0]}! 🎉</h2>
+            
+            <p style="color: #666; font-size: 16px; margin: 0 0 25px 0;">
+              Thank you for joining the Seekon family! We're thrilled to have you on board and can't wait for you to explore our curated collection of premium fashion and footwear.
+            </p>
+            
+            <!-- Promo Code Box -->
+            <div style="background: linear-gradient(135deg, #2563eb 0%, #1d4ed8 100%); border-radius: 12px; padding: 25px; margin: 30px 0; color: white;">
+              <p style="margin: 0 0 10px 0; font-size: 14px; opacity: 0.9;">🎁 YOUR EXCLUSIVE WELCOME GIFT</p>
+              <p style="margin: 0 0 15px 0; font-size: 28px; font-weight: bold; letter-spacing: 2px;">WELCOME500</p>
+              <p style="margin: 0; font-size: 14px; opacity: 0.9;">Get KES 500 off your first order!</p>
+            </div>
+            
+            <p style="color: #666; font-size: 14px; margin: 0 0 25px 0;">
+              Use this code at checkout to redeem your welcome discount. This offer is valid for 30 days.
+            </p>
+            
+            <!-- CTA Button -->
+            <a href="${frontendUrl}" style="display: inline-block; padding: 14px 32px; color: white; background-color: #2563eb; text-decoration: none; border-radius: 8px; font-weight: 600; font-size: 16px;">
+              Start Shopping
+            </a>
+          </div>
+          
+          <!-- Features -->
+          <div style="display: flex; justify-content: space-between; margin-top: 30px; padding: 0 20px;">
+            <div style="text-align: center; flex: 1;">
+              <span style="font-size: 24px;">🚚</span>
+              <p style="margin: 5px 0 0 0; font-size: 12px; color: #666;">Free Shipping</p>
+            </div>
+            <div style="text-align: center; flex: 1;">
+              <span style="font-size: 24px;">↩️</span>
+              <p style="margin: 5px 0 0 0; font-size: 12px; color: #666;">Easy Returns</p>
+            </div>
+            <div style="text-align: center; flex: 1;">
+              <span style="font-size: 24px;">💬</span>
+              <p style="margin: 5px 0 0 0; font-size: 12px; color: #666;">24/7 Support</p>
+            </div>
+          </div>
+          
+          <!-- Footer -->
+          <div style="text-align: center; margin-top: 40px; padding-top: 20px; border-top: 1px solid #e5e7eb;">
+            <p style="margin: 0; color: #9ca3af; font-size: 12px;">
+              Follow us on social media for the latest trends and exclusive deals
+            </p>
+            <p style="margin: 15px 0 0 0; color: #111; font-size: 14px;">
+              © ${new Date().getFullYear()} Seekon Apparel. All rights reserved.
+            </p>
+          </div>
+          
+        </body>
+        </html>
+      `
+    });
+    console.log(`✅ Welcome email sent to ${email}:`, data);
+    return { success: true, message: 'Welcome email sent successfully', data };
+  } catch (error) {
+    console.error('❌ Error sending welcome email:', error.message);
+    // Fall back to console logging on error
+    console.log(`⚠️  Welcome email failed. Logging to console...`);
+    console.log(`📧 WELCOME EMAIL\nTo: ${email}\nName: ${name}\nPromo Code: WELCOME500\n`);
+    return { 
+      success: true, 
+      message: 'Welcome email attempted but failed - logged to console',
+      error: error.message 
+    };
+  }
+};
