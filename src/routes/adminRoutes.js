@@ -32,6 +32,13 @@ import {
   updateOrderStatus,
   cancelOrder
 } from '../controllers/orderController.js';
+import {
+  getCoupons,
+  createCoupon,
+  updateCoupon,
+  deleteCoupon,
+  toggleCouponStatus
+} from '../controllers/couponController.js';
 import { authMiddleware, adminMiddleware } from '../middleware/auth.js';
 import Notification from '../models/Notification.js';
 
@@ -234,6 +241,13 @@ router.post('/cloudinary/delete', authMiddleware, adminMiddleware, async (req, r
     res.status(500).json({ success: false, message: error.message });
   }
 });
+
+// Coupon Management Routes - FIX 404 error
+router.get('/coupons', authMiddleware, adminMiddleware, getCoupons);
+router.post('/coupons', authMiddleware, adminMiddleware, createCoupon);
+router.put('/coupons/:id', authMiddleware, adminMiddleware, updateCoupon);
+router.delete('/coupons/:id', authMiddleware, adminMiddleware, deleteCoupon);
+router.patch('/coupons/:id/toggle', authMiddleware, adminMiddleware, toggleCouponStatus);
 
 export default router;
 
