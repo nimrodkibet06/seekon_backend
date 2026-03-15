@@ -309,7 +309,7 @@ export const sendWelcomeEmail = async (name, email) => {
     const data = await resend.emails.send({
       from: 'Seekon Apparel <noreply@seekonapparelglobal.com>',
       to: email,
-      subject: 'Welcome to Seekon! 🎉 Your Exclusive Welcome Gift Inside!',,
+      subject: 'Welcome to Seekon! 🎉 Your Exclusive Welcome Gift Inside!',
       html: `
         <!DOCTYPE html>
         <html>
