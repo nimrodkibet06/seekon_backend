@@ -76,7 +76,7 @@ export const sendVerificationEmail = async (email, token) => {
 
   try {
     const data = await resend.emails.send({
-      from: 'Seekon <noreply@seek-on.app>',
+      from: 'Seekon <noreply@seekonapparelglobal.com>',
       to: email,
       subject: 'Verify Your Email Address',
       html: `
@@ -127,7 +127,7 @@ export const sendPasswordResetEmail = async (email, token) => {
   
   try {
     const data = await resend.emails.send({
-      from: 'Seekon <noreply@seek-on.app>',
+      from: 'Seekon <noreply@seekonapparelglobal.com>',
       to: email,
       subject: 'Reset Your Password',
       html: `
@@ -184,7 +184,7 @@ export const sendOTPEmail = async (email, otp) => {
   
   try {
     const data = await resend.emails.send({
-      from: 'Seekon <noreply@seek-on.app>',
+      from: 'Seekon <noreply@seekonapparelglobal.com>',
       to: email,
       subject: 'Your Seekon Verification Code',
       html: `
@@ -220,7 +220,7 @@ export const sendContactEmail = async (name, email, subject, message) => {
 
   try {
     const data = await resend.emails.send({
-      from: 'Seekon Contact Form <noreply@seek-on.app>',
+      from: 'Seekon Contact Form <noreply@seekonapparelglobal.com>',
       to: adminEmail,
       reply_to: email,
       subject: `New Inquiry: ${subject}`,
@@ -262,7 +262,7 @@ export const sendNewsletterWelcome = async (email) => {
   }
   try {
     await resend.emails.send({
-      from: 'Seekon Apparel <noreply@seek-on.app>',
+      from: 'Seekon Apparel <noreply@seekonapparelglobal.com>',
       to: email,
       subject: 'Welcome to the Seekon Family! 🎉',
       html: `
@@ -307,9 +307,9 @@ export const sendWelcomeEmail = async (name, email) => {
 
   try {
     const data = await resend.emails.send({
-      from: 'Seekon Apparel <noreply@seek-on.app>',
+      from: 'Seekon Apparel <noreply@seekonapparelglobal.com>',
       to: email,
-      subject: 'Welcome to Seekon! 🎉 Your Exclusive Welcome Gift Inside!',
+      subject: 'Welcome to Seekon! 🎉 Your Exclusive Welcome Gift Inside!',,
       html: `
         <!DOCTYPE html>
         <html>
