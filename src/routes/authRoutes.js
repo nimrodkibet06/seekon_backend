@@ -1,6 +1,6 @@
 import express from 'express';
 import rateLimit from 'express-rate-limit';
-import { register, login, getMe, unifiedAuth, updateProfile, forgotPassword, resetPassword, verifyEmail, resendVerificationEmail, verifyOTP, sendVerificationCode } from '../controllers/authController.js';
+import { register, login, getMe, unifiedAuth, updateProfile, forgotPassword, resetPassword, verifyEmail, resendVerificationEmail, verifyOTP, sendVerificationCode, googleAuth } from '../controllers/authController.js';
 import { authMiddleware } from '../middleware/auth.js';
 
 const router = express.Router();
@@ -33,6 +33,11 @@ const passwordResetLimiter = rateLimit({
 // @desc    Send verification code to email
 // @access  Public
 router.post('/send-code', sendVerificationCode);
+
+// @route   POST /api/auth/google
+// @desc    Login or Register with Google
+// @access  Public
+router.post('/google', googleAuth);
 
 // @route   POST /api/auth/unified
 // @desc    Unified login/register - auto-detects new users and signs them up

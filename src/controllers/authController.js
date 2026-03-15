@@ -2,6 +2,7 @@ import jwt from 'jsonwebtoken';
 import User from '../models/User.js';
 import { sendVerificationEmail, sendPasswordResetEmail, sendOTPEmail, sendWelcomeEmail } from '../utils/email.js';
 import crypto from 'crypto';
+import { OAuth2Client } from 'google-auth-library';
 
 /**
  * Generate JWT Token
@@ -10,6 +11,86 @@ const generateToken = (userId, role = 'user') => {
   return jwt.sign({ userId, role }, process.env.JWT_SECRET, {
     expiresIn: '7d'
   });
+};
+
+const client = new OAuth2Client(process.env.GOOGLE_CLIENT_ID);
+
+/**
+ * @route   POST /api/auth/google
+ * @desc    Login or Register with Google
+ * @access  Public
+ */
+export const googleAuth = async (req, res) => {
+  try {
+    const { credential } = req.body;
+
+    if (!credential) {
+      return res.status(400).json({
+        success: false,
+        message: 'Google credential is required'
+      });
+    }
+
+    // Verify the Google token
+    const ticket = await client.verifyIdToken({
+      idToken: credential,
+      audience: process.env.GOOGLE_CLIENT_ID
+    });
+
+    const payload = ticket.getPayload();
+    const { email, name, picture } = payload;
+
+    // Check if user exists
+    let user = await User.findOne({ email });
+
+    if (user) {
+      // Check if user is a Google user
+      if (user.authProvider !== 'google') {
+        return res.status(400).json({
+          success: false,
+          message: 'This email is already registered with a different method. Please use email and password to login.'
+        });
+      }
+      // User exists with Google - just log them in
+      // Update profile photo if not set
+      if (!user.profilePhoto && picture) {
+        user.profilePhoto = picture;
+        await user.save();
+      }
+    } else {
+      // Create new Google user
+      user = await User.create({
+        name,
+        email,
+        authProvider: 'google',
+        profilePhoto: picture || '',
+        isVerified: true // Google emails are already verified
+      });
+    }
+
+    // Generate token
+    const token = generateToken(user._id, user.role);
+
+    res.status(200).json({
+      success: true,
+      message: 'Google login successful',
+      token,
+      user: {
+        id: user._id,
+        name: user.name,
+        email: user.email,
+        role: user.role,
+        profilePhoto: user.profilePhoto || '',
+        authProvider: user.authProvider
+      }
+    });
+  } catch (error) {
+    console.error('Google auth error:', error);
+    res.status(500).json({
+      success: false,
+      message: error.message || 'Google authentication failed'
+    });
+  }
 };
 
 /**
