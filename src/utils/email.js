@@ -57,7 +57,7 @@ const logEmailToConsole = (type, to, url) => {
 
 // Function to send verification email
 export const sendVerificationEmail = async (email, token) => {
-  const frontendUrl = process.env.FRONTEND_URL || 'https://www.seek-on.app';
+  const frontendUrl = process.env.FRONTEND_URL || 'https://www.seekonapparelglobal.com';
   const verificationUrl = `${frontendUrl}/verify-email/${token}`;
   
   // Try to get Resend client
@@ -109,7 +109,7 @@ export const sendVerificationEmail = async (email, token) => {
 // Function to send password reset email
 export const sendPasswordResetEmail = async (email, token) => {
   // Use the new domain for password reset links
-  const resetUrl = `https://www.seek-on.app/reset-password/${token}`;
+  const resetUrl = `${process.env.FRONTEND_URL || 'https://www.seekonapparelglobal.com'}/reset-password/${token}`;
   
   // Try to get Resend client
   const resend = getResendClient();
@@ -273,7 +273,7 @@ export const sendNewsletterWelcome = async (email) => {
             <p style="margin: 0; font-size: 14px; color: #666;">As a thank you, use this code on your first order:</p>
             <h2 style="letter-spacing: 2px; color: #111;">SEEKON10</h2>
           </div>
-          <a href="https://www.seek-on.app/collection" style="background-color: #00A676; color: white; padding: 12px 24px; text-decoration: none; border-radius: 6px; font-weight: bold; display: inline-block;">Shop Now</a>
+          <a href="${process.env.FRONTEND_URL || 'https://www.seekonapparelglobal.com'}/collection" style="background-color: #00A676; color: white; padding: 12px 24px; text-decoration: none; border-radius: 6px; font-weight: bold; display: inline-block;">Shop Now</a>
         </div>
       `
     });
@@ -290,7 +290,7 @@ export const sendNewsletterWelcome = async (email) => {
  * @param {string} email - User's email address
  */
 export const sendWelcomeEmail = async (name, email) => {
-  const frontendUrl = process.env.FRONTEND_URL || 'https://www.seek-on.app';
+  const frontendUrl = process.env.FRONTEND_URL || 'https://www.seekonapparelglobal.com';
   
   // Try to get Resend client
   const resend = getResendClient();

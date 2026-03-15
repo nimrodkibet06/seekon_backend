@@ -48,8 +48,8 @@ app.options('*', cors({
 
 // CORS configuration - explicitly allow production frontend and Vercel
 const allowedOrigins = [
-  'https://www.seek-on.app',
-  'https://seek-on.app',
+  'https://www.seekonapparelglobal.com',
+  'https://seekonapparelglobal.com',
   'https://seekonbackend-production.up.railway.app',
   'http://localhost:5173',
   'http://localhost:5177',
