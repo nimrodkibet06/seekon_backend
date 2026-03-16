@@ -1,20 +1,15 @@
 import multer from 'multer';
 import path from 'path';
 import fs from 'fs';
-
-// Ensure uploads directory exists
-const uploadDir = 'uploads/';
-if (!fs.existsSync(uploadDir)) {
-  fs.mkdirSync(uploadDir, { recursive: true });
-}
+import os from 'os';
 
 /**
  * Configure Multer for file uploads using disk storage
- * Files are saved temporarily to disk for AI processing
+ * Files are saved temporarily to OS temp directory to prevent memory issues
  */
 const storage = multer.diskStorage({
   destination: (req, file, cb) => {
-    cb(null, uploadDir);
+    cb(null, os.tmpdir()); // Use OS temp directory to prevent OOM
   },
   filename: (req, file, cb) => {
     const uniqueSuffix = Date.now() + '-' + Math.round(Math.random() * 1E9);

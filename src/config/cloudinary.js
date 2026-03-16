@@ -1,5 +1,6 @@
 import { v2 as cloudinary } from 'cloudinary';
 import { isServiceConfigured, getMissingConfig } from './checkEnv.js';
+import fs from 'fs';
 
 // Check if Cloudinary is configured
 const cloudinaryConfigured = isServiceConfigured('cloudinary');
@@ -36,16 +37,41 @@ export const uploadToCloudinary = async (filePath, folder = 'seekon-apparel') =>
     throw new Error('Cloudinary is not configured. Please set CLOUDINARY_CLOUD_NAME, CLOUDINARY_API_KEY, and CLOUDINARY_API_SECRET environment variables.');
   }
   
+  // Check if it's a file path (not a data URL)
+  const isFilePath = !filePath.startsWith('data:');
+  
   try {
     const result = await cloudinary.uploader.upload(filePath, {
       folder,
       resource_type: 'auto',
     });
+    
+    // Garbage collection: Delete temp file after successful upload (only for actual file paths)
+    if (isFilePath) {
+      try {
+        if (fs.existsSync(filePath)) {
+          fs.unlinkSync(filePath);
+        }
+      } catch (cleanupError) {
+        console.warn('⚠️ Failed to cleanup temp file:', cleanupError.message);
+      }
+    }
+    
     return {
       url: result.secure_url,
       public_id: result.public_id,
     };
   } catch (error) {
+    // Cleanup temp file even if upload failed (only for actual file paths)
+    if (isFilePath) {
+      try {
+        if (fs.existsSync(filePath)) {
+          fs.unlinkSync(filePath);
+        }
+      } catch (cleanupError) {
+        console.warn('⚠️ Failed to cleanup temp file:', cleanupError.message);
+      }
+    }
     throw new Error(`Cloudinary upload failed: ${error.message}`);
   }
 };
