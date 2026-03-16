@@ -417,7 +417,7 @@ export const mpesaCallback = async (req, res) => {
             method: 'mpesa',
             amount: amountPaid || 0,
             status: 'completed',
-            reference: order?.paymentReference || checkoutRequestID,
+            reference: mpesaReceipt || order?.paymentReference || checkoutRequestID,
             mpesaResponse: callback,
             callbackData: callback
           });
@@ -521,7 +521,7 @@ const processMpesaResult = async (resultCode, checkoutRequestID, amount, mpesaRe
         method: 'mpesa',
         amount: amount || 0,
         status: 'completed',
-        reference: order?.paymentReference || checkoutRequestID,
+        reference: mpesaReceipt || order?.paymentReference || checkoutRequestID,
         callbackData: { ResultCode: resultCode, ResultDesc: 'Success via query' }
       });
       console.log('✅ Transaction created via query for successful payment!');
