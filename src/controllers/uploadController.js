@@ -1,14 +1,16 @@
 import { uploadToCloudinary, deleteFromCloudinary } from '../config/cloudinary.js';
 import removeBackground from '@imgly/background-removal-node';
 import fs from 'fs';
+import path from 'path';
 
 /**
  * @route   POST /api/upload
- * @desc    Upload file to Cloudinary with local AI background removal
+ * @desc    Upload file to Cloudinary with local AI background removal (OOM-optimized)
  * @access  Private
  */
 export const uploadFile = async (req, res) => {
   let localFilePath = null;
+  let processedFilePath = null;
   
   try {
     if (!req.file) {
@@ -19,21 +21,39 @@ export const uploadFile = async (req, res) => {
     }
 
     localFilePath = req.file.path;
-    console.log('Processing image with local AI background removal:', localFilePath);
+    console.log('Processing image with local AI (Small Model)...');
 
-    // 1. Process the image locally using the free AI
-    const blob = await removeBackground(localFilePath);
+    // 1. Configure AI for Low-Memory Environments
+    const aiConfig = {
+      model: 'small', // CRITICAL: Uses ~40MB RAM instead of ~100MB+
+      output: { format: 'image/png' }
+    };
 
-    // 2. Convert the output to a Base64 string for Cloudinary
-    const buffer = Buffer.from(await blob.arrayBuffer());
-    const dataURL = `data:image/png;base64,${buffer.toString("base64")}`;
+    // 2. Process image with small model to prevent OOM
+    const resultBlob = await removeBackground(localFilePath, aiConfig);
+    
+    // 3. Save processed transparent PNG locally
+    const arrayBuffer = await resultBlob.arrayBuffer();
+    const buffer = Buffer.from(arrayBuffer);
+    
+    processedFilePath = path.join(path.dirname(localFilePath), `no-bg-${Date.now()}.png`);
+    fs.writeFileSync(processedFilePath, buffer);
 
-    // 3. Upload the transparent PNG to Cloudinary
-    const result = await uploadToCloudinary(dataURL, 'seekon-apparel');
+    // Free memory from blob
+    resultBlob.close?.();
 
-    // 4. Delete the temporary raw image from the server
-    if (fs.existsSync(localFilePath)) {
-      fs.unlinkSync(localFilePath);
+    console.log('AI processing complete. Uploading to Cloudinary...');
+
+    // 4. Upload the final transparent image to Cloudinary
+    const result = await uploadToCloudinary(processedFilePath, 'seekon-apparel');
+
+    // 5. Aggressive Cleanup (Free Disk & Memory instantly)
+    if (localFilePath && fs.existsSync(localFilePath)) fs.unlinkSync(localFilePath);
+    if (processedFilePath && fs.existsSync(processedFilePath)) fs.unlinkSync(processedFilePath);
+
+    // Force garbage collection hint (Node.js will GC when needed)
+    if (global.gc) {
+      global.gc();
     }
 
     res.status(200).json({
@@ -45,16 +65,15 @@ export const uploadFile = async (req, res) => {
       }
     });
   } catch (error) {
-    console.error('Upload error details:', error);
+    console.error('Upload/AI error details:', error);
     
-    // Cleanup on fail
-    if (localFilePath && fs.existsSync(localFilePath)) {
-      fs.unlinkSync(localFilePath);
-    }
+    // Ensure temporary files are deleted even if it fails
+    if (localFilePath && fs.existsSync(localFilePath)) fs.unlinkSync(localFilePath);
+    if (processedFilePath && fs.existsSync(processedFilePath)) fs.unlinkSync(processedFilePath);
 
     res.status(500).json({
       success: false,
-      message: error.message || 'Image processing failed'
+      message: 'Image processing failed. Server memory might be full.'
     });
   }
 };
@@ -88,7 +107,3 @@ export const deleteFile = async (req, res) => {
     });
   }
 };
-
-
-
-
