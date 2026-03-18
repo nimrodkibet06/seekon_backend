@@ -15,7 +15,7 @@ export const uploadFile = async (req, res) => {
     const imageBuffer = fs.readFileSync(localFilePath);
     
     // Attempt 1
-    let response = await fetch("https://api-inference.huggingface.co/models/briaai/RMBG-1.4", {
+    let response = await fetch("https://router.huggingface.co/hf-inference/models/briaai/RMBG-1.4", {
       headers: { Authorization: `Bearer ${process.env.HUGGINGFACE_API_KEY}` },
       method: "POST",
       body: imageBuffer,
@@ -26,7 +26,7 @@ export const uploadFile = async (req, res) => {
       console.log('⏳ Model is sleeping. Waiting 15 seconds for it to wake up...');
       await delay(15000);
       console.log('🔄 Retrying Hugging Face API...');
-      response = await fetch("https://api-inference.huggingface.co/models/briaai/RMBG-1.4", {
+      response = await fetch("https://router.huggingface.co/hf-inference/models/briaai/RMBG-1.4", {
         headers: { Authorization: `Bearer ${process.env.HUGGINGFACE_API_KEY}` },
         method: "POST",
         body: imageBuffer,
