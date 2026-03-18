@@ -1,13 +1,18 @@
 import { uploadToCloudinary, deleteFromCloudinary } from '../config/cloudinary.js';
 import fs from 'fs';
 
-// The Background Worker (Does not block the response)
-const processBackgroundRemoval = async (localFilePath, originalPublicId) => {
+export const uploadFile = async (req, res) => {
+  if (!req.file) {
+    return res.status(400).json({ success: false, message: 'No file uploaded' });
+  }
+
+  const localFilePath = req.file.path;
+
   try {
-    console.log('Background Job: Sending image to Hugging Face...');
+    console.log('1. Sending image to Hugging Face API...');
     const imageBuffer = fs.readFileSync(localFilePath);
     
-    // Using briaai/RMBG-1.4 (Excellent free background removal model)
+    // Call the free Hugging Face model
     const response = await fetch(
       "https://api-inference.huggingface.co/models/briaai/RMBG-1.4",
       {
@@ -17,58 +22,41 @@ const processBackgroundRemoval = async (localFilePath, originalPublicId) => {
       }
     );
 
-    if (!response.ok) throw new Error('Hugging Face API failed');
+    let finalFilePath = localFilePath; // Default to original if AI fails
 
-    const transparentBuffer = await response.arrayBuffer();
-    const tempBgRemovedPath = `${localFilePath}-nobg.png`;
-    fs.writeFileSync(tempBgRemovedPath, Buffer.from(transparentBuffer));
+    if (response.ok) {
+      console.log('2. Hugging Face Success! Saving transparent image locally...');
+      const transparentBuffer = await response.arrayBuffer();
+      finalFilePath = `${localFilePath}-nobg.png`;
+      fs.writeFileSync(finalFilePath, Buffer.from(transparentBuffer));
+    } else {
+      console.log('⚠️ Hugging Face API failed or timed out. Falling back to original image.');
+    }
 
-    console.log('Background Job: Uploading transparent version to Cloudinary...');
-    // We upload to Cloudinary. In a full implementation, you'd then update your MongoDB product document here!
-    const result = await uploadToCloudinary(tempBgRemovedPath, 'seekon-apparel');
-    console.log('Background Job: Success! New URL:', result.url);
+    console.log('3. Uploading final image to Cloudinary...');
+    const result = await uploadToCloudinary(finalFilePath, 'seekon-apparel');
 
-    // Cleanup
-    if (fs.existsSync(tempBgRemovedPath)) fs.unlinkSync(tempBgRemovedPath);
+    // 4. Aggressive Cleanup to save disk space
     if (fs.existsSync(localFilePath)) fs.unlinkSync(localFilePath);
+    if (finalFilePath !== localFilePath && fs.existsSync(finalFilePath)) {
+        fs.unlinkSync(finalFilePath);
+    }
 
-  } catch (error) {
-    console.error('Background Job Failed:', error.message);
-    // If it fails, we still have the original image uploaded, so nothing is broken.
-    if (fs.existsSync(localFilePath)) fs.unlinkSync(localFilePath);
-  }
-};
-
-/**
- * @route   POST /api/upload
- * @desc    Upload file to Cloudinary with background removal (Fire and Forget)
- * @access  Private
- */
-export const uploadFile = async (req, res) => {
-  if (!req.file) return res.status(400).json({ success: false, message: 'No file' });
-
-  const localFilePath = req.file.path;
-
-  try {
-    // 1. Instantly upload original image to Cloudinary (Fast)
-    const originalUpload = await uploadToCloudinary(localFilePath, 'seekon-apparel');
-
-    // 2. FIRE AND FORGET: Start the background job WITHOUT the 'await' keyword
-    processBackgroundRemoval(localFilePath, originalUpload.public_id);
-
-    // 3. INSTANT RESPONSE: Tell frontend it worked immediately
+    // 5. Send the exact URL back to the frontend
     res.status(200).json({
       success: true,
-      message: 'Image uploaded. Background removal is processing in the background.',
+      message: response.ok ? 'Image processed and uploaded' : 'Uploaded original image (AI unavailable)',
       data: {
-        url: originalUpload.url, // Temporary original URL
-        publicId: originalUpload.public_id
+        url: result.url,
+        publicId: result.public_id
       }
     });
 
   } catch (error) {
+    console.error('Upload Pipeline Error:', error);
+    // Ensure temp files are deleted even on crash
     if (fs.existsSync(localFilePath)) fs.unlinkSync(localFilePath);
-    res.status(500).json({ success: false, message: 'Upload failed' });
+    res.status(500).json({ success: false, message: 'Upload pipeline failed' });
   }
 };
 
