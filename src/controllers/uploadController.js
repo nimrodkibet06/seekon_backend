@@ -4,12 +4,28 @@ import fs from 'fs';
 import path from 'path';
 
 export const uploadFile = async (req, res) => {
-  // Support both single file uploads (field: 'image') and multiple file uploads (field: 'images')
-  const files = req.files || (req.file ? [req.file] : []);
+  try {
+    // Extract from ALL possible Multer field names
+    let files = [];
+    if (req.files) {
+      if (Array.isArray(req.files)) {
+        files = req.files;
+      } else {
+        files = [
+          ...(req.files.image || []), 
+          ...(req.files.images || []),
+          ...(req.files.file || []), 
+          ...(req.files.files || [])
+        ];
+      }
+    } else if (req.file) {
+      files = [req.file];
+    }
 
-  if (!files || files.length === 0) {
-    return res.status(400).json({ success: false, message: 'No files uploaded' });
-  }
+    if (!files || files.length === 0) {
+      console.error("Upload Error: Multer parsed request, but found no valid files.");
+      return res.status(400).json({ success: false, message: 'No valid files found.' });
+    }
 
   const uploadedImages = [];
   const aiConfig = { model: 'small', output: { format: 'image/png' } };

@@ -6,10 +6,12 @@ import { upload } from '../middleware/upload.js';
 
 const router = express.Router();
 
-// Create the Multer configuration with both field names
+// Create the Multer configuration with all possible field names
 const multerUpload = upload.fields([
   { name: 'image', maxCount: 10 }, 
-  { name: 'images', maxCount: 10 }
+  { name: 'images', maxCount: 10 },
+  { name: 'file', maxCount: 10 },    // Added for compatibility
+  { name: 'files', maxCount: 10 }    // Added for compatibility
 ]);
 
 // The Interceptor Middleware to catch hidden Multer errors
