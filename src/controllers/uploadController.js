@@ -4,8 +4,9 @@ import fs from 'fs';
 import path from 'path';
 
 export const uploadFile = async (req, res) => {
-  try {
-    // Extract from ALL possible Multer field names
+  try { // Top-level try block
+
+    // 1. Safely extract files regardless of Multer configuration
     let files = [];
     if (req.files) {
       if (Array.isArray(req.files)) {
@@ -22,24 +23,24 @@ export const uploadFile = async (req, res) => {
       files = [req.file];
     }
 
+    // 2. Validate files exist
     if (!files || files.length === 0) {
       console.error("Upload Error: Multer parsed request, but found no valid files.");
       return res.status(400).json({ success: false, message: 'No valid files found.' });
     }
 
-  const uploadedImages = [];
-  const aiConfig = { model: 'small', output: { format: 'image/png' } };
+    const uploadedImages = [];
+    const aiConfig = { model: 'small', output: { format: 'image/png' } };
 
-  try {
     console.log(`Starting sequential AI processing of ${files.length} image(s)...`);
 
-    // CRITICAL: Use for...of loop to process ONE at a time. Do NOT use Promise.all().
+    // 3. Sequential Processing Loop
     for (let i = 0; i < files.length; i++) {
       const file = files[i];
       const localFilePath = file.path;
       let processedFilePath = null;
 
-      try {
+      try { // Inner try block per file
         console.log(`\n[${i + 1}/${files.length}] AI Processing: ${file.originalname}`);
 
         const imageBuffer = fs.readFileSync(localFilePath);
@@ -59,27 +60,25 @@ export const uploadFile = async (req, res) => {
 
       } catch (itemError) {
         console.error(`[${i + 1}/${files.length}] AI Failed on image. Falling back to original. Error:`, itemError.message);
-        // Fallback safety net: if AI fails on one image, upload the original so data isn't lost
         const fallbackResult = await uploadToCloudinary(localFilePath, 'seekon-apparel');
         uploadedImages.push({ url: fallbackResult.url, publicId: fallbackResult.public_id });
       } finally {
-        // AGGRESSIVE CLEANUP: Delete temp files immediately after each loop iteration to free RAM/Disk
+        // Cleanup temporary files
         if (fs.existsSync(localFilePath)) fs.unlinkSync(localFilePath);
         if (processedFilePath && fs.existsSync(processedFilePath)) fs.unlinkSync(processedFilePath);
       }
     }
 
     console.log('\n✅ All images processed successfully!');
-    res.status(200).json({
+    return res.status(200).json({
       success: true,
       message: 'Images processed and uploaded',
-      // Return array if multiple, or single object if only one was uploaded, to keep frontend happy
       data: uploadedImages.length === 1 ? uploadedImages[0] : uploadedImages 
     });
 
-  } catch (error) {
+  } catch (error) { // Top-level catch block
     console.error('Server Upload Pipeline Error:', error);
-    res.status(500).json({ success: false, message: 'Upload pipeline failed' });
+    return res.status(500).json({ success: false, message: 'Upload pipeline failed' });
   }
 };
 
