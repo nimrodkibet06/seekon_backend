@@ -42,5 +42,5 @@ export const upload = multer({
 });
 
 // Export separate upload instances for single and multiple files
-export const uploadSingle = upload.single('file');
-export const uploadMultiple = upload.array('files', 10); // Max 10 files at once
+export const uploadSingle = upload.single('image');
+export const uploadMultiple = upload.array('images', 10); // Max 10 files, field name 'images'

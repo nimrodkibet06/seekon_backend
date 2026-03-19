@@ -4,7 +4,7 @@ import fs from 'fs';
 import path from 'path';
 
 export const uploadFile = async (req, res) => {
-  // Support both single file uploads and multiple file uploads seamlessly
+  // Support both single file uploads (field: 'image') and multiple file uploads (field: 'images')
   const files = req.files || (req.file ? [req.file] : []);
 
   if (!files || files.length === 0) {
