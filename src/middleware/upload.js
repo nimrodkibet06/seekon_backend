@@ -40,3 +40,7 @@ export const upload = multer({
   },
   fileFilter: fileFilter
 });
+
+// Export separate upload instances for single and multiple files
+export const uploadSingle = upload.single('file');
+export const uploadMultiple = upload.array('files', 10); // Max 10 files at once

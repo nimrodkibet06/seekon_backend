@@ -4,50 +4,66 @@ import fs from 'fs';
 import path from 'path';
 
 export const uploadFile = async (req, res) => {
-  let localFilePath = null;
-  let processedFilePath = null;
+  // Support both single file uploads and multiple file uploads seamlessly
+  const files = req.files || (req.file ? [req.file] : []);
+
+  if (!files || files.length === 0) {
+    return res.status(400).json({ success: false, message: 'No files uploaded' });
+  }
+
+  const uploadedImages = [];
+  const aiConfig = { model: 'small', output: { format: 'image/png' } };
 
   try {
-    if (!req.file) return res.status(400).json({ success: false, message: 'No file uploaded' });
+    console.log(`Starting sequential AI processing of ${files.length} image(s)...`);
 
-    localFilePath = req.file.path;
-    console.log('1. Processing image with Server-Side AI (Small Model)...');
+    // CRITICAL: Use for...of loop to process ONE at a time. Do NOT use Promise.all().
+    for (let i = 0; i < files.length; i++) {
+      const file = files[i];
+      const localFilePath = file.path;
+      let processedFilePath = null;
 
-    // Force the lightweight model to protect RAM
-    const aiConfig = {
-      model: 'small',
-      output: { format: 'image/png' }
-    };
+      try {
+        console.log(`\n[${i + 1}/${files.length}] AI Processing: ${file.originalname}`);
 
-    const imageBuffer = fs.readFileSync(localFilePath);
-    const imageBlob = new Blob([imageBuffer], { type: req.file.mimetype });
-    
-    // Run the AI 
-    const resultBlob = await removeBackground(imageBlob, aiConfig);
-    
-    // Save the transparent result
-    const arrayBuffer = await resultBlob.arrayBuffer();
-    processedFilePath = path.join(path.dirname(localFilePath), `no-bg-${Date.now()}.png`);
-    fs.writeFileSync(processedFilePath, Buffer.from(arrayBuffer));
+        const imageBuffer = fs.readFileSync(localFilePath);
+        const imageBlob = new Blob([imageBuffer], { type: file.mimetype });
+        
+        const resultBlob = await removeBackground(imageBlob, aiConfig);
+        
+        const arrayBuffer = await resultBlob.arrayBuffer();
+        processedFilePath = path.join(path.dirname(localFilePath), `no-bg-${Date.now()}-${i}.png`);
+        fs.writeFileSync(processedFilePath, Buffer.from(arrayBuffer));
 
-    console.log('2. AI complete. Uploading to Cloudinary...');
-    const result = await uploadToCloudinary(processedFilePath, 'seekon-apparel');
+        console.log(`[${i + 1}/${files.length}] AI complete. Uploading to Cloudinary...`);
+        const result = await uploadToCloudinary(processedFilePath, 'seekon-apparel');
 
-    // Aggressive Cleanup
-    if (fs.existsSync(localFilePath)) fs.unlinkSync(localFilePath);
-    if (fs.existsSync(processedFilePath)) fs.unlinkSync(processedFilePath);
+        uploadedImages.push({ url: result.url, publicId: result.public_id });
+        console.log(`[${i + 1}/${files.length}] Success!`);
 
+      } catch (itemError) {
+        console.error(`[${i + 1}/${files.length}] AI Failed on image. Falling back to original. Error:`, itemError.message);
+        // Fallback safety net: if AI fails on one image, upload the original so data isn't lost
+        const fallbackResult = await uploadToCloudinary(localFilePath, 'seekon-apparel');
+        uploadedImages.push({ url: fallbackResult.url, publicId: fallbackResult.public_id });
+      } finally {
+        // AGGRESSIVE CLEANUP: Delete temp files immediately after each loop iteration to free RAM/Disk
+        if (fs.existsSync(localFilePath)) fs.unlinkSync(localFilePath);
+        if (processedFilePath && fs.existsSync(processedFilePath)) fs.unlinkSync(processedFilePath);
+      }
+    }
+
+    console.log('\n✅ All images processed successfully!');
     res.status(200).json({
       success: true,
-      message: 'Background removed and uploaded successfully',
-      data: { url: result.url, publicId: result.public_id }
+      message: 'Images processed and uploaded',
+      // Return array if multiple, or single object if only one was uploaded, to keep frontend happy
+      data: uploadedImages.length === 1 ? uploadedImages[0] : uploadedImages 
     });
 
   } catch (error) {
-    console.error('Server AI Error:', error);
-    if (localFilePath && fs.existsSync(localFilePath)) fs.unlinkSync(localFilePath);
-    if (processedFilePath && fs.existsSync(processedFilePath)) fs.unlinkSync(processedFilePath);
-    res.status(500).json({ success: false, message: 'Image processing failed' });
+    console.error('Server Upload Pipeline Error:', error);
+    res.status(500).json({ success: false, message: 'Upload pipeline failed' });
   }
 };
 
