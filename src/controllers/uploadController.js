@@ -124,3 +124,28 @@ export const uploadFile = async (req, res) => {
     });
   }
 };
+
+// Export deleteFile for backwards compatibility with routes
+export const deleteFile = async (req, res) => {
+  try {
+    const { publicId } = req.params;
+    if (!publicId) {
+      return res.status(400).json({
+        success: false,
+        message: 'Public ID is required'
+      });
+    }
+    // Import dynamically to avoid circular dependencies
+    const { deleteFromCloudinary } = await import('../config/cloudinary.js');
+    await deleteFromCloudinary(publicId);
+    res.status(200).json({
+      success: true,
+      message: 'File deleted successfully'
+    });
+  } catch (error) {
+    res.status(500).json({
+      success: false,
+      message: error.message
+    });
+  }
+};
