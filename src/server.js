@@ -17,6 +17,9 @@ import settingRoutes from './routes/settingRoutes.js';
 import path from 'path';
 import { fileURLToPath } from 'url';
 
+// Import and initialize the background worker (auto-starts when imported)
+import './workers/imageWorker.js';
+
 // ES Module dirname fix
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
@@ -154,14 +157,6 @@ const startServer = async () => {
       console.log(`🚀 Server running on port ${PORT}`);
       console.log(`📍 Environment: ${process.env.NODE_ENV}`);
       console.log(`✅ API URL: ${isProduction ? 'https://seekonbackend-production.up.railway.app' : 'http://localhost:' + PORT}`);
-    });
-    
-    // Start background worker (in same process, but processes jobs asynchronously)
-    // This runs the worker without blocking the main server
-    import('./workers/imageWorker.js').then(module => {
-      console.log(`⚡ Background worker initialized`);
-    }).catch(err => {
-      console.error(`❌ Worker failed to start:`, err.message);
     });
     
   } catch (error) {
