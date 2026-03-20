@@ -40,7 +40,18 @@ console.log(`🌐 Frontend URL configured: ${frontendUrl}`);
 
 // ⚠️ CRITICAL: Handle CORS preflight requests FIRST - before any other middleware
 app.options('*', cors({
-  origin: frontendUrl,
+  origin: function(origin, callback) {
+    // Allow requests with no origin (like mobile apps, postman, or curl)
+    if (!origin) return callback(null, true);
+    
+    // Allow exact matches OR any Vercel preview/deployment URL dynamically
+    if (allowedOrigins.includes(origin) || origin.endsWith('.vercel.app')) {
+      callback(null, true);
+    } else {
+      console.warn(`CORS preflight origin: ${origin} - allowing for development`);
+      callback(null, true); // Allow for now
+    }
+  },
   credentials: true,
   methods: ['GET', 'POST', 'PUT', 'DELETE', 'PATCH', 'OPTIONS'],
   allowedHeaders: ['Content-Type', 'Authorization', 'X-Requested-With', 'Accept', 'Origin']
