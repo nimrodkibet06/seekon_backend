@@ -1,109 +1,126 @@
-import { uploadToCloudinary, deleteFromCloudinary } from '../config/cloudinary.js';
 import removeBackground from '@imgly/background-removal-node';
+import { uploadToCloudinary } from '../config/cloudinary.js';
 import fs from 'fs';
 import path from 'path';
 
-/**
- * @route   POST /api/upload
- * @desc    Upload file to Cloudinary with local AI background removal (OOM-optimized)
- * @access  Private
- */
 export const uploadFile = async (req, res) => {
-  let localFilePath = null;
-  let processedFilePath = null;
-  
   try {
-    if (!req.file) {
-      return res.status(400).json({
-        success: false,
-        message: 'No file uploaded'
+    // 1. THE CATCH-ALL: Safely extract files regardless of how Multer packaged them
+    let files = [];
+    
+    if (req.files) {
+      if (Array.isArray(req.files)) {
+        files = req.files;
+      } else {
+        // Handle object with multiple field names
+        files = [
+          ...(req.files.image || []),
+          ...(req.files.images || []),
+          ...(req.files.file || []),
+          ...(req.files.files || [])
+        ];
+      }
+    } else if (req.file) {
+      files = [req.file];
+    }
+
+    // Validate files array
+    if (!files || files.length === 0) {
+      return res.status(400).json({ 
+        success: false, 
+        message: 'No valid files found.' 
       });
     }
 
-    localFilePath = req.file.path;
-    console.log('Processing image with local AI (Small Model)...');
-
-    // 1. Configure AI for Low-Memory Environments
-    const aiConfig = {
-      model: 'small', // CRITICAL: Uses ~40MB RAM instead of ~100MB+
-      output: { format: 'image/png' }
+    const uploadedImages = [];
+    // Configure local AI to use the small model to protect Railway RAM
+    const aiConfig = { 
+      model: 'small', 
+      output: { format: 'image/png' } 
     };
 
-    // 2. Process image with small model to prevent OOM
-    const resultBlob = await removeBackground(localFilePath, aiConfig);
-    
-    // 3. Save processed transparent PNG locally
-    const arrayBuffer = await resultBlob.arrayBuffer();
-    const buffer = Buffer.from(arrayBuffer);
-    
-    processedFilePath = path.join(path.dirname(localFilePath), `no-bg-${Date.now()}.png`);
-    fs.writeFileSync(processedFilePath, buffer);
+    console.log(`🚀 Starting sequential LOCAL AI processing of ${files.length} image(s)...`);
 
-    // Free memory from blob
-    resultBlob.close?.();
+    // 2. THE QUEUE: Process sequentially using for...of to protect RAM
+    for (const file of files) {
+      const localFilePath = file.path;
+      let processedFilePath = null;
 
-    console.log('AI processing complete. Uploading to Cloudinary...');
+      try {
+        console.log(`\n📝 Processing: ${file.originalname}`);
 
-    // 4. Upload the final transparent image to Cloudinary
-    const result = await uploadToCloudinary(processedFilePath, 'seekon-apparel');
+        // 3. Local AI Integration - Read file into Blob
+        const imageBuffer = fs.readFileSync(localFilePath);
+        const imageBlob = new Blob([imageBuffer], { type: file.mimetype });
 
-    // 5. Aggressive Cleanup (Free Disk & Memory instantly)
-    if (localFilePath && fs.existsSync(localFilePath)) fs.unlinkSync(localFilePath);
-    if (processedFilePath && fs.existsSync(processedFilePath)) fs.unlinkSync(processedFilePath);
+        // Run local background removal with small model
+        const resultBlob = await removeBackground(imageBlob, aiConfig);
 
-    // Force garbage collection hint (Node.js will GC when needed)
-    if (global.gc) {
-      global.gc();
-    }
+        // Save the transparent image to temp file
+        const arrayBuffer = await resultBlob.arrayBuffer();
+        processedFilePath = path.join(
+          path.dirname(localFilePath), 
+          `no-bg-${Date.now()}-${Math.random().toString(36).substr(2, 9)}.png`
+        );
+        fs.writeFileSync(processedFilePath, Buffer.from(arrayBuffer));
 
-    res.status(200).json({
-      success: true,
-      message: 'Image processed and uploaded successfully',
-      data: {
-        url: result.url,
-        publicId: result.public_id
+        console.log(`✅ AI complete. Uploading to Cloudinary...`);
+
+        // 4. Cloudinary Upload
+        const result = await uploadToCloudinary(processedFilePath, 'seekon-apparel');
+
+        uploadedImages.push({ 
+          url: result.url, 
+          publicId: result.public_id 
+        });
+
+        console.log(`✅ Uploaded: ${result.url}`);
+
+      } catch (itemError) {
+        // 4. FALLBACK: Upload original image if AI fails
+        console.error(`⚠️ AI failed for ${file.originalname}:`, itemError.message);
+        console.log(`🔄 Falling back to original image...`);
+        
+        try {
+          const fallbackResult = await uploadToCloudinary(localFilePath, 'seekon-apparel');
+          uploadedImages.push({ 
+            url: fallbackResult.url, 
+            publicId: fallbackResult.public_id 
+          });
+          console.log(`✅ Fallback uploaded: ${fallbackResult.url}`);
+        } catch (fallbackError) {
+          console.error(`❌ Fallback also failed:`, fallbackError.message);
+          // Continue to next image instead of breaking
+        }
+      } finally {
+        // 5. AGGRESSIVE CLEANUP: Delete temp files to prevent disk space leaks
+        try {
+          if (localFilePath && fs.existsSync(localFilePath)) {
+            fs.unlinkSync(localFilePath);
+          }
+          if (processedFilePath && fs.existsSync(processedFilePath)) {
+            fs.unlinkSync(processedFilePath);
+          }
+        } catch (cleanupError) {
+          console.warn(`⚠️ Cleanup warning:`, cleanupError.message);
+        }
       }
-    });
-  } catch (error) {
-    console.error('Upload/AI error details:', error);
-    
-    // Ensure temporary files are deleted even if it fails
-    if (localFilePath && fs.existsSync(localFilePath)) fs.unlinkSync(localFilePath);
-    if (processedFilePath && fs.existsSync(processedFilePath)) fs.unlinkSync(processedFilePath);
-
-    res.status(500).json({
-      success: false,
-      message: 'Image processing failed. Server memory might be full.'
-    });
-  }
-};
-
-/**
- * @route   DELETE /api/upload/:publicId
- * @desc    Delete file from Cloudinary
- * @access  Private
- */
-export const deleteFile = async (req, res) => {
-  try {
-    const { publicId } = req.params;
-
-    if (!publicId) {
-      return res.status(400).json({
-        success: false,
-        message: 'Public ID is required'
-      });
     }
 
-    await deleteFromCloudinary(publicId);
+    console.log(`\n🎉 Processed ${uploadedImages.length}/${files.length} images successfully!`);
 
-    res.status(200).json({
+    // 6. Return response
+    return res.status(200).json({
       success: true,
-      message: 'File deleted successfully'
+      message: 'Images processed and uploaded',
+      data: uploadedImages
     });
+
   } catch (error) {
-    res.status(500).json({
-      success: false,
-      message: error.message
+    console.error('🚨 Server Upload Pipeline Error:', error);
+    return res.status(500).json({ 
+      success: false, 
+      message: 'Upload pipeline failed' 
     });
   }
 };
