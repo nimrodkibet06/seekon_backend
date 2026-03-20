@@ -1,5 +1,5 @@
 import removeBackground from '@imgly/background-removal-node';
-import { uploadToCloudinary } from '../config/cloudinary.js';
+import { uploadToCloudinary, deleteFromCloudinary } from '../config/cloudinary.js';
 import fs from 'fs';
 import path from 'path';
 
@@ -135,8 +135,6 @@ export const deleteFile = async (req, res) => {
         message: 'Public ID is required'
       });
     }
-    // Import dynamically to avoid circular dependencies
-    const { deleteFromCloudinary } = await import('../config/cloudinary.js');
     await deleteFromCloudinary(publicId);
     res.status(200).json({
       success: true,
