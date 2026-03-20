@@ -1,6 +1,6 @@
 import express from 'express';
 import multer from 'multer';
-import { uploadFile, deleteFile } from '../controllers/uploadController.js';
+import { uploadFile, deleteFile, getUploadStatus } from '../controllers/uploadController.js';
 import { authMiddleware } from '../middleware/auth.js';
 import { upload } from '../middleware/upload.js';
 
@@ -45,5 +45,10 @@ router.post('/', authMiddleware, uploadInterceptor, uploadFile);
 // @desc    Delete file from Cloudinary
 // @access  Private
 router.delete('/:publicId', authMiddleware, deleteFile);
+
+// @route   GET /api/upload/status/:jobId
+// @desc    Get background removal job status
+// @access  Private
+router.get('/status/:jobId', authMiddleware, getUploadStatus);
 
 export default router;

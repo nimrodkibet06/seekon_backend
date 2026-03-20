@@ -155,6 +155,15 @@ const startServer = async () => {
       console.log(`📍 Environment: ${process.env.NODE_ENV}`);
       console.log(`✅ API URL: ${isProduction ? 'https://seekonbackend-production.up.railway.app' : 'http://localhost:' + PORT}`);
     });
+    
+    // Start background worker (in same process, but processes jobs asynchronously)
+    // This runs the worker without blocking the main server
+    import('./workers/imageWorker.js').then(module => {
+      console.log(`⚡ Background worker initialized`);
+    }).catch(err => {
+      console.error(`❌ Worker failed to start:`, err.message);
+    });
+    
   } catch (error) {
     console.error('❌ Failed to start server:', error.message);
     process.exit(1);

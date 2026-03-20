@@ -1,7 +1,7 @@
-import removeBackground from '@imgly/background-removal-node';
-import { uploadToCloudinary, deleteFromCloudinary } from '../config/cloudinary.js';
+import { uploadToCloudinary } from '../config/cloudinary.js';
 import fs from 'fs';
 import path from 'path';
+import { createJob, getJobStatus } from '../queue/jobQueue.js';
 
 export const uploadFile = async (req, res) => {
   try {
@@ -12,7 +12,6 @@ export const uploadFile = async (req, res) => {
       if (Array.isArray(req.files)) {
         files = req.files;
       } else {
-        // Handle object with multiple field names
         files = [
           ...(req.files.image || []),
           ...(req.files.images || []),
@@ -32,74 +31,49 @@ export const uploadFile = async (req, res) => {
       });
     }
 
+    console.log(`🚀 Processing ${files.length} image(s) via async queue...`);
+
     const uploadedImages = [];
-    // Configure local AI to use the small model to protect Railway RAM
-    const aiConfig = { 
-      model: 'small', 
-      output: { format: 'image/png' } 
-    };
 
-    console.log(`🚀 Starting sequential LOCAL AI processing of ${files.length} image(s)...`);
-
-    // 2. THE QUEUE: Process sequentially using for...of to protect RAM
+    // Process each file - upload to Cloudinary immediately, then queue for AI
     for (const file of files) {
       const localFilePath = file.path;
-      let processedFilePath = null;
 
       try {
-        console.log(`\n📝 Processing: ${file.originalname}`);
-
-        // 3. Local AI Integration - Read file into Blob
-        const imageBuffer = fs.readFileSync(localFilePath);
-        const imageBlob = new Blob([imageBuffer], { type: file.mimetype });
-
-        // Run local background removal with small model
-        const resultBlob = await removeBackground(imageBlob, aiConfig);
-
-        // Save the transparent image to temp file
-        const arrayBuffer = await resultBlob.arrayBuffer();
-        processedFilePath = path.join(
-          path.dirname(localFilePath), 
-          `no-bg-${Date.now()}-${Math.random().toString(36).substr(2, 9)}.png`
-        );
-        fs.writeFileSync(processedFilePath, Buffer.from(arrayBuffer));
-
-        console.log(`✅ AI complete. Uploading to Cloudinary...`);
-
-        // 4. Cloudinary Upload
-        const result = await uploadToCloudinary(processedFilePath, 'seekon-apparel');
-
-        uploadedImages.push({ 
-          url: result.url, 
-          publicId: result.public_id 
+        console.log(`📤 Uploading original: ${file.originalname}`);
+        
+        // Upload raw image to Cloudinary first (fast, low memory)
+        const result = await uploadToCloudinary(localFilePath, 'seekon-apparel');
+        
+        const cloudinaryUrl = result.url;
+        const originalPublicId = result.public_id;
+        
+        console.log(`✅ Original uploaded: ${cloudinaryUrl}`);
+        
+        // Queue background removal job
+        const jobId = createJob({
+          cloudinaryUrl,
+          originalPublicId,
+          originalName: file.originalname
+        });
+        
+        console.log(`📋 Job queued: ${jobId}`);
+        
+        uploadedImages.push({
+          jobId,
+          originalUrl: cloudinaryUrl,
+          originalPublicId,
+          status: 'pending'
         });
 
-        console.log(`✅ Uploaded: ${result.url}`);
-
       } catch (itemError) {
-        // 4. FALLBACK: Upload original image if AI fails
-        console.error(`⚠️ AI failed for ${file.originalname}:`, itemError.message);
-        console.log(`🔄 Falling back to original image...`);
-        
-        try {
-          const fallbackResult = await uploadToCloudinary(localFilePath, 'seekon-apparel');
-          uploadedImages.push({ 
-            url: fallbackResult.url, 
-            publicId: fallbackResult.public_id 
-          });
-          console.log(`✅ Fallback uploaded: ${fallbackResult.url}`);
-        } catch (fallbackError) {
-          console.error(`❌ Fallback also failed:`, fallbackError.message);
-          // Continue to next image instead of breaking
-        }
+        console.error(`❌ Failed to upload ${file.originalname}:`, itemError.message);
+        // Continue with next file
       } finally {
-        // 5. AGGRESSIVE CLEANUP: Delete temp files to prevent disk space leaks
+        // Cleanup local temp file
         try {
           if (localFilePath && fs.existsSync(localFilePath)) {
             fs.unlinkSync(localFilePath);
-          }
-          if (processedFilePath && fs.existsSync(processedFilePath)) {
-            fs.unlinkSync(processedFilePath);
           }
         } catch (cleanupError) {
           console.warn(`⚠️ Cleanup warning:`, cleanupError.message);
@@ -107,25 +81,68 @@ export const uploadFile = async (req, res) => {
       }
     }
 
-    console.log(`\n🎉 Processed ${uploadedImages.length}/${files.length} images successfully!`);
+    if (uploadedImages.length === 0) {
+      return res.status(500).json({
+        success: false,
+        message: 'Failed to upload any images'
+      });
+    }
 
-    // 6. Return response
+    console.log(`\n🎉 Queued ${uploadedImages.length} images for background processing!`);
+
     return res.status(200).json({
       success: true,
-      message: 'Images processed and uploaded',
+      message: 'Images uploaded. Background removal in progress.',
       data: uploadedImages
     });
 
   } catch (error) {
-    console.error('🚨 Server Upload Pipeline Error:', error);
+    console.error('🚨 Server Upload Error:', error);
     return res.status(500).json({ 
       success: false, 
-      message: 'Upload pipeline failed' 
+      message: 'Upload failed' 
     });
   }
 };
 
-// Export deleteFile for backwards compatibility with routes
+/**
+ * Get job status for background processing
+ */
+export const getUploadStatus = async (req, res) => {
+  try {
+    const { jobId } = req.params;
+    
+    if (!jobId) {
+      return res.status(400).json({
+        success: false,
+        message: 'Job ID required'
+      });
+    }
+    
+    const jobStatus = getJobStatus(jobId);
+    
+    if (!jobStatus) {
+      return res.status(404).json({
+        success: false,
+        message: 'Job not found'
+      });
+    }
+    
+    return res.status(200).json({
+      success: true,
+      data: jobStatus
+    });
+    
+  } catch (error) {
+    console.error('🚨 Status Check Error:', error);
+    return res.status(500).json({
+      success: false,
+      message: 'Failed to get status'
+    });
+  }
+};
+
+// Keep deleteFile for backwards compatibility
 export const deleteFile = async (req, res) => {
   try {
     const { publicId } = req.params;
@@ -135,6 +152,7 @@ export const deleteFile = async (req, res) => {
         message: 'Public ID is required'
       });
     }
+    const { deleteFromCloudinary } = await import('../config/cloudinary.js');
     await deleteFromCloudinary(publicId);
     res.status(200).json({
       success: true,
