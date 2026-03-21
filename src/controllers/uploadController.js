@@ -1,21 +1,18 @@
 import { uploadToCloudinary } from '../config/cloudinary.js';
 import fs from 'fs';
-import path from 'path';
-import { createJob, getJobStatus } from '../queue/jobQueue.js';
 
 export const uploadFile = async (req, res) => {
   try {
-    // 1. THE CATCH-ALL: Safely extract files regardless of how Multer packaged them
+    // 1. Multer Catch-All
     let files = [];
-    
     if (req.files) {
       if (Array.isArray(req.files)) {
         files = req.files;
       } else {
         files = [
-          ...(req.files.image || []),
+          ...(req.files.image || []), 
           ...(req.files.images || []),
-          ...(req.files.file || []),
+          ...(req.files.file || []), 
           ...(req.files.files || [])
         ];
       }
@@ -23,122 +20,35 @@ export const uploadFile = async (req, res) => {
       files = [req.file];
     }
 
-    // Validate files array
     if (!files || files.length === 0) {
-      return res.status(400).json({ 
-        success: false, 
-        message: 'No valid files found.' 
-      });
+      return res.status(400).json({ success: false, message: 'No valid files found.' });
     }
-
-    console.log(`🚀 Processing ${files.length} image(s) via async queue...`);
 
     const uploadedImages = [];
 
-    // Process each file - upload to Cloudinary immediately, then queue for AI
-    for (const file of files) {
-      const localFilePath = file.path;
-
+    // 2. Direct Sequential Cloudinary Upload (No AI, No Workers)
+    for (let i = 0; i < files.length; i++) {
+      const file = files[i];
       try {
-        console.log(`📤 Uploading original: ${file.originalname}`);
-        
-        // Upload raw image to Cloudinary first (fast, low memory)
-        const result = await uploadToCloudinary(localFilePath, 'seekon-apparel');
-        
-        const cloudinaryUrl = result.url;
-        const originalPublicId = result.public_id;
-        
-        console.log(`✅ Original uploaded: ${cloudinaryUrl}`);
-        
-        // Queue background removal job
-        const jobId = createJob({
-          cloudinaryUrl,
-          originalPublicId,
-          originalName: file.originalname
-        });
-        
-        console.log(`📋 Job queued: ${jobId}`);
-        
-        uploadedImages.push({
-          jobId,
-          originalUrl: cloudinaryUrl,
-          originalPublicId,
-          status: 'pending'
-        });
-
-      } catch (itemError) {
-        console.error(`❌ Failed to upload ${file.originalname}:`, itemError.message);
-        // Continue with next file
+        console.log(`[${i + 1}/${files.length}] Uploading direct to Cloudinary: ${file.originalname}`);
+        const result = await uploadToCloudinary(file.path, 'seekon-apparel');
+        uploadedImages.push({ url: result.url, publicId: result.public_id });
+      } catch (err) {
+        console.error(`Error uploading ${file.originalname}:`, err.message);
       } finally {
-        // Cleanup local temp file
-        try {
-          if (localFilePath && fs.existsSync(localFilePath)) {
-            fs.unlinkSync(localFilePath);
-          }
-        } catch (cleanupError) {
-          console.warn(`⚠️ Cleanup warning:`, cleanupError.message);
-        }
+        if (fs.existsSync(file.path)) fs.unlinkSync(file.path);
       }
     }
 
-    if (uploadedImages.length === 0) {
-      return res.status(500).json({
-        success: false,
-        message: 'Failed to upload any images'
-      });
-    }
-
-    console.log(`\n🎉 Queued ${uploadedImages.length} images for background processing!`);
-
     return res.status(200).json({
       success: true,
-      message: 'Images uploaded. Background removal in progress.',
+      message: 'Images uploaded successfully',
       data: uploadedImages
     });
 
   } catch (error) {
-    console.error('🚨 Server Upload Error:', error);
-    return res.status(500).json({ 
-      success: false, 
-      message: 'Upload failed' 
-    });
-  }
-};
-
-/**
- * Get job status for background processing
- */
-export const getUploadStatus = async (req, res) => {
-  try {
-    const { jobId } = req.params;
-    
-    if (!jobId) {
-      return res.status(400).json({
-        success: false,
-        message: 'Job ID required'
-      });
-    }
-    
-    const jobStatus = getJobStatus(jobId);
-    
-    if (!jobStatus) {
-      return res.status(404).json({
-        success: false,
-        message: 'Job not found'
-      });
-    }
-    
-    return res.status(200).json({
-      success: true,
-      data: jobStatus
-    });
-    
-  } catch (error) {
-    console.error('🚨 Status Check Error:', error);
-    return res.status(500).json({
-      success: false,
-      message: 'Failed to get status'
-    });
+    console.error('Upload pipeline error:', error);
+    return res.status(500).json({ success: false, message: 'Upload failed' });
   }
 };
 

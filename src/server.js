@@ -17,9 +17,6 @@ import settingRoutes from './routes/settingRoutes.js';
 import path from 'path';
 import { fileURLToPath } from 'url';
 
-// Import and initialize the background worker (auto-starts when imported)
-import './workers/imageWorker.js';
-
 // ES Module dirname fix
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
