@@ -139,18 +139,17 @@ export const updateUserStatus = async (req, res) => {
   }
 };
 
-// Delete User - Cascading Hard Delete
-// This deletes the user AND all associated carts and orders
-// to prevent orphaned data from crashing analytics
+// Soft Delete User - Deactivate instead of hard delete
+// This preserves referential integrity with Orders and Reviews
 export const deleteUser = async (req, res) => {
   try {
     const { id } = req.params;
 
-    // 1. Safety Check: Prevent admin from deleting themselves
+    // 1. Safety Check: Prevent admin from deactivating themselves
     if (req.user && req.user._id.toString() === id) {
       return res.status(400).json({ 
         success: false, 
-        message: "You cannot delete your own admin account." 
+        message: "You cannot deactivate your own admin account." 
       });
     }
     
@@ -158,7 +157,7 @@ export const deleteUser = async (req, res) => {
     if (req.admin && req.admin._id && req.admin._id.toString() === id) {
       return res.status(400).json({ 
         success: false, 
-        message: "You cannot delete your own admin account." 
+        message: "You cannot deactivate your own admin account." 
       });
     }
 
@@ -167,46 +166,87 @@ export const deleteUser = async (req, res) => {
       return res.status(404).json({ success: false, message: "User not found" });
     }
 
-    // 2. Cascade Delete: Wipe out their carts (Cart uses userId field)
-    const cartsDeleted = await Cart.deleteMany({ userId: id }).catch(e => { 
-      console.log('No carts found for user:', id); 
-      return { deletedCount: 0 }; 
-    });
-    console.log(`🗑️ Deleted ${cartsDeleted.deletedCount || 0} carts for user ${id}`);
+    // Check if already deactivated
+    if (!targetUser.isActive) {
+      return res.status(400).json({ 
+        success: false, 
+        message: "User is already deactivated" 
+      });
+    }
 
-    // 3. Cascade Delete: Wipe out their orders (Order uses user field)
-    const ordersDeleted = await Order.deleteMany({ user: id }).catch(e => { 
-      console.log('No orders found for user:', id); 
-      return { deletedCount: 0 }; 
-    });
-    console.log(`🗑️ Deleted ${ordersDeleted.deletedCount || 0} orders for user ${id}`);
-
-    // 4. Finally, Hard Delete the User
-    await User.findByIdAndDelete(id);
-    console.log(`🗑️ User ${id} permanently deleted`);
+    // 2. Soft Delete: Set isActive to false
+    const user = await User.findByIdAndUpdate(
+      id,
+      { isActive: false },
+      { new: true }
+    );
 
     // Log action
     await SystemLog.create({
-      action: 'user_deleted_cascade',
+      action: 'user_deactivated',
       actor: req.admin?.email || 'system',
       actorType: 'admin',
-      details: { 
-        userId: id, 
-        cartsDeleted: cartsDeleted.deletedCount || 0,
-        ordersDeleted: ordersDeleted.deletedCount || 0
-      },
+      details: { userId: id },
       module: 'user'
     });
 
     res.status(200).json({ 
       success: true, 
-      message: "User and all associated test data have been permanently deleted." 
+      message: "User has been deactivated successfully." 
     });
   } catch (error) {
-    console.error('Error hard-deleting user:', error);
+    console.error('Error deactivating user:', error);
     res.status(500).json({
       success: false,
-      message: 'Failed to delete user: ' + error.message
+      message: 'Failed to deactivate user: ' + error.message
+    });
+  }
+};
+
+// Reactivate User - Restore a deactivated user
+export const reactivateUser = async (req, res) => {
+  try {
+    const { id } = req.params;
+
+    const targetUser = await User.findById(id);
+    if (!targetUser) {
+      return res.status(404).json({ success: false, message: "User not found" });
+    }
+
+    // Check if already active
+    if (targetUser.isActive) {
+      return res.status(400).json({ 
+        success: false, 
+        message: "User is already active" 
+      });
+    }
+
+    // Reactivate: Set isActive to true
+    const user = await User.findByIdAndUpdate(
+      id,
+      { isActive: true },
+      { new: true }
+    );
+
+    // Log action
+    await SystemLog.create({
+      action: 'user_reactivated',
+      actor: req.admin?.email || 'system',
+      actorType: 'admin',
+      details: { userId: id },
+      module: 'user'
+    });
+
+    res.status(200).json({ 
+      success: true, 
+      message: "User has been reactivated successfully.",
+      user
+    });
+  } catch (error) {
+    console.error('Error reactivating user:', error);
+    res.status(500).json({
+      success: false,
+      message: 'Failed to reactivate user: ' + error.message
     });
   }
 };

@@ -17,7 +17,8 @@ import {
   getAllUsers,
   getUser,
   updateUserStatus,
-  deleteUser
+  deleteUser,
+  reactivateUser
 } from '../controllers/userController.js';
 import {
   getAllProducts,
@@ -161,6 +162,9 @@ router.patch('/users/:id/role', authMiddleware, adminMiddleware, async (req, res
   }
 });
 router.delete('/users/:id', authMiddleware, adminMiddleware, deleteUser);
+
+// Reactivate User (Restore a deactivated user)
+router.put('/users/:id/reactivate', authMiddleware, adminMiddleware, reactivateUser);
 
 // Product management
 router.get('/products', authMiddleware, adminMiddleware, getAllProducts);

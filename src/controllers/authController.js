@@ -51,6 +51,15 @@ export const googleAuth = async (req, res) => {
           message: 'This email is already registered with a different method. Please use email and password to login.'
         });
       }
+      
+      // Check if user is active (soft delete check)
+      if (!user.isActive) {
+        return res.status(403).json({
+          success: false,
+          message: 'This account has been deactivated. Please contact support.'
+        });
+      }
+      
       // User exists with Google - just log them in
       // Update profile photo if not set
       if (!user.profilePhoto && picture) {
@@ -426,6 +435,14 @@ export const login = async (req, res) => {
       });
     }
 
+    // Check if user is active (soft delete check)
+    if (!user.isActive) {
+      return res.status(403).json({
+        success: false,
+        message: 'This account has been deactivated. Please contact support.'
+      });
+    }
+
     // Generate token with role
     const token = generateToken(user._id, user.role);
 
@@ -483,6 +500,14 @@ export const unifiedAuth = async (req, res) => {
         return res.status(401).json({
           success: false,
           message: 'Invalid credentials'
+        });
+      }
+      
+      // Check if user is active (soft delete check)
+      if (!user.isActive) {
+        return res.status(403).json({
+          success: false,
+          message: 'This account has been deactivated. Please contact support.'
         });
       }
     } else {
