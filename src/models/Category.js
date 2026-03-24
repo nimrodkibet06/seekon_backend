@@ -16,7 +16,13 @@ const categorySchema = new mongoose.Schema({
     type: String,
     default: ''
   },
+  // Hierarchical structure: subcategories and brands specific to this category
   subCategories: [{
+    type: String,
+    trim: true,
+    uppercase: true
+  }],
+  brands: [{
     type: String,
     trim: true,
     uppercase: true

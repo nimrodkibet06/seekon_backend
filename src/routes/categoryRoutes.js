@@ -4,6 +4,45 @@ import { authMiddleware, adminMiddleware } from '../middleware/auth.js';
 
 const router = express.Router();
 
+// Hardcoded data for seeding
+const hardcodedCategories = [
+  {
+    name: 'SNEKERS',
+    subCategories: ['ALL SNEAKERS', 'RUNNING', 'BASKETBALL', 'LIFESTYLE', 'HIGH TOPS', 'LOW TOPS'],
+    brands: ['NIKE', 'ADIDAS', 'JORDAN', 'PUMA', 'NEW BALANCE', 'CONVERSE', 'VANS', 'REEBOK']
+  },
+  {
+    name: 'APPAREL',
+    subCategories: ['ALL CLOTHING', 'T-SHIRTS', 'SHIRTS', 'HOODIES', 'JACKETS', 'PANTS', 'SHORTS'],
+    brands: ['NIKE', 'ADIDAS', 'PUMA', 'JORDAN', 'THE NORTH FACE', 'ESSENTIALS', 'UNDER ARMOUR']
+  },
+  {
+    name: 'BOOTS',
+    subCategories: ['ALL BOOTS', 'HIKING', 'CASUAL', 'WINTER'],
+    brands: ['TIMBERLAND', 'DR. MARTENS', 'UGG', 'COLUMBIA', 'SOREL']
+  },
+  {
+    name: 'MEN',
+    subCategories: ['ALL MEN', 'SHOES', 'CLOTHING', 'ACCESSORIES'],
+    brands: ['NIKE', 'ADIDAS', 'JORDAN', 'PUMA', 'NEW BALANCE']
+  },
+  {
+    name: 'WOMEN',
+    subCategories: ['ALL WOMEN', 'SHOES', 'CLOTHING', 'ACCESSORIES'],
+    brands: ['NIKE', 'ADIDAS', 'JORDAN', 'PUMA', 'NEW BALANCE']
+  },
+  {
+    name: 'KIDS',
+    subCategories: ['ALL KIDS', 'BOYS', 'GIRLS', 'SHOES', 'CLOTHING'],
+    brands: ['NIKE', 'ADIDAS', 'JORDAN', 'PUMA']
+  },
+  {
+    name: 'ACCESSORIES',
+    subCategories: ['ALL ACCESSORIES', 'BAGS', 'HATS', 'SOCKS', 'WATCHES', 'WALLETS', 'SUNGLASSES'],
+    brands: ['NIKE', 'ADIDAS', 'PUMA', 'JORDAN', 'RESTYLE', 'CASIO']
+  }
+];
+
 // GET all categories - public
 router.get('/', async (req, res) => {
   try {
@@ -40,7 +79,7 @@ router.get('/:id', async (req, res) => {
 // POST create new category - admin only
 router.post('/', authMiddleware, adminMiddleware, async (req, res) => {
   try {
-    const { name, description, image, subCategories, order } = req.body;
+    const { name, description, image, subCategories, brands, order } = req.body;
     
     // Check if category already exists
     const existingCategory = await Category.findOne({ name: name.toUpperCase() });
@@ -53,6 +92,7 @@ router.post('/', authMiddleware, adminMiddleware, async (req, res) => {
       description,
       image,
       subCategories: subCategories || [],
+      brands: brands || [],
       order: order || 0
     });
     
@@ -66,7 +106,7 @@ router.post('/', authMiddleware, adminMiddleware, async (req, res) => {
 // PUT update category - admin only
 router.put('/:id', authMiddleware, adminMiddleware, async (req, res) => {
   try {
-    const { name, description, image, subCategories, isActive, order } = req.body;
+    const { name, description, image, subCategories, brands, isActive, order } = req.body;
     
     const category = await Category.findById(req.params.id);
     if (!category) {
@@ -77,6 +117,7 @@ router.put('/:id', authMiddleware, adminMiddleware, async (req, res) => {
     if (description !== undefined) category.description = description;
     if (image !== undefined) category.image = image;
     if (subCategories !== undefined) category.subCategories = subCategories;
+    if (brands !== undefined) category.brands = brands;
     if (isActive !== undefined) category.isActive = isActive;
     if (order !== undefined) category.order = order;
     
@@ -123,6 +164,78 @@ router.delete('/:id/subcategories/:subCategory', authMiddleware, adminMiddleware
     );
     await category.save();
     res.json({ success: true, category });
+  } catch (error) {
+    res.status(500).json({ success: false, message: error.message });
+  }
+});
+
+// POST add brand to category - admin only
+router.post('/:id/brands', authMiddleware, adminMiddleware, async (req, res) => {
+  try {
+    const { brand } = req.body;
+    
+    const category = await Category.findById(req.params.id);
+    if (!category) {
+      return res.status(404).json({ success: false, message: 'Category not found' });
+    }
+    
+    const normalizedBrand = brand.toUpperCase();
+    if (category.brands.includes(normalizedBrand)) {
+      return res.status(400).json({ success: false, message: 'Brand already exists in this category' });
+    }
+    
+    category.brands.push(normalizedBrand);
+    await category.save();
+    res.json({ success: true, category });
+  } catch (error) {
+    res.status(500).json({ success: false, message: error.message });
+  }
+});
+
+// DELETE brand from category - admin only
+router.delete('/:id/brands/:brand', authMiddleware, adminMiddleware, async (req, res) => {
+  try {
+    const category = await Category.findById(req.params.id);
+    if (!category) {
+      return res.status(404).json({ success: false, message: 'Category not found' });
+    }
+    
+    category.brands = category.brands.filter(
+      b => b !== req.params.brand.toUpperCase()
+    );
+    await category.save();
+    res.json({ success: true, category });
+  } catch (error) {
+    res.status(500).json({ success: false, message: error.message });
+  }
+});
+
+// POST seed categories from hardcoded data - admin only
+router.post('/seed', authMiddleware, adminMiddleware, async (req, res) => {
+  try {
+    const results = [];
+    
+    for (const catData of hardcodedCategories) {
+      let category = await Category.findOne({ name: catData.name });
+      
+      if (category) {
+        // Update existing category with all subcategories and brands
+        category.subCategories = [...new Set([...category.subCategories, ...catData.subCategories])];
+        category.brands = [...new Set([...category.brands, ...catData.brands])];
+        await category.save();
+      } else {
+        // Create new category
+        category = new Category(catData);
+        await category.save();
+      }
+      results.push(category);
+    }
+    
+    res.json({ 
+      success: true, 
+      message: `Seeded ${results.length} categories with subcategories and brands`,
+      categories: results 
+    });
   } catch (error) {
     res.status(500).json({ success: false, message: error.message });
   }
