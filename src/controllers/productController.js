@@ -355,7 +355,10 @@ export const addReview = async (req, res) => {
     }
     
     const userId = req.user._id;
-    const userName = req.user.name || req.user.email;
+    // Extract just the first name from the user's name
+    const fullName = req.user.name || req.user.email || '';
+    const firstName = fullName.split(' ')[0]; // Get just the first name
+    const userName = firstName || req.user.email;
 
     // Validate input
     if (!rating || rating < 1 || rating > 5) {
