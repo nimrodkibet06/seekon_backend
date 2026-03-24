@@ -63,6 +63,35 @@ router.get('/all', authMiddleware, adminMiddleware, async (req, res) => {
   }
 });
 
+// POST seed categories from hardcoded data - admin only (must be before /:id)
+router.post('/seed', authMiddleware, adminMiddleware, async (req, res) => {
+  try {
+    const results = [];
+    
+    for (const catData of hardcodedCategories) {
+      let category = await Category.findOne({ name: catData.name });
+      
+      if (category) {
+        category.subCategories = [...new Set([...category.subCategories, ...catData.subCategories])];
+        category.brands = [...new Set([...category.brands, ...catData.brands])];
+        await category.save();
+      } else {
+        category = new Category(catData);
+        await category.save();
+      }
+      results.push(category);
+    }
+    
+    res.json({ 
+      success: true, 
+      message: `Seeded ${results.length} categories with subcategories and brands`,
+      categories: results 
+    });
+  } catch (error) {
+    res.status(500).json({ success: false, message: error.message });
+  }
+});
+
 // GET single category by ID - public
 router.get('/:id', async (req, res) => {
   try {
@@ -205,37 +234,6 @@ router.delete('/:id/brands/:brand', authMiddleware, adminMiddleware, async (req,
     );
     await category.save();
     res.json({ success: true, category });
-  } catch (error) {
-    res.status(500).json({ success: false, message: error.message });
-  }
-});
-
-// POST seed categories from hardcoded data - admin only
-router.post('/seed', authMiddleware, adminMiddleware, async (req, res) => {
-  try {
-    const results = [];
-    
-    for (const catData of hardcodedCategories) {
-      let category = await Category.findOne({ name: catData.name });
-      
-      if (category) {
-        // Update existing category with all subcategories and brands
-        category.subCategories = [...new Set([...category.subCategories, ...catData.subCategories])];
-        category.brands = [...new Set([...category.brands, ...catData.brands])];
-        await category.save();
-      } else {
-        // Create new category
-        category = new Category(catData);
-        await category.save();
-      }
-      results.push(category);
-    }
-    
-    res.json({ 
-      success: true, 
-      message: `Seeded ${results.length} categories with subcategories and brands`,
-      categories: results 
-    });
   } catch (error) {
     res.status(500).json({ success: false, message: error.message });
   }
