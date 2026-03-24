@@ -6,7 +6,8 @@ import {
   updateProduct,
   deleteProduct,
   addReview,
-  canUserReview
+  canUserReview,
+  migrateCategoryTypo
 } from '../controllers/productController.js';
 import { authMiddleware, adminMiddleware } from '../middleware/auth.js';
 
@@ -24,5 +25,8 @@ router.get('/:id/can-review', authMiddleware, canUserReview);
 router.post('/', authMiddleware, adminMiddleware, createProduct);
 router.put('/:id', authMiddleware, adminMiddleware, updateProduct);
 router.delete('/:id', authMiddleware, adminMiddleware, deleteProduct);
+
+// Migration Routes (Admin only)
+router.put('/migrate-category-typo', authMiddleware, adminMiddleware, migrateCategoryTypo);
 
 export default router;

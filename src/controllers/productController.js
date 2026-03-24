@@ -438,5 +438,63 @@ export const addReview = async (req, res) => {
   }
 };
 
+// Migration: Fix category typo (snekers -> sneakers/SNEKERS)
+export const migrateCategoryTypo = async (req, res) => {
+  try {
+    // Find products with potential typos in category
+    const typoVariants = ['snekers', 'SNEKERS', 'Snekers', 'sneaker', 'SNEAKER'];
+    
+    // First, find and report how many products have the typo
+    const productsWithTypo = await Product.find({
+      category: { $in: typoVariants }
+    });
+    
+    console.log(`Found ${productsWithTypo.length} products with category typo`);
+    
+    if (productsWithTypo.length === 0) {
+      return res.status(200).json({
+        success: true,
+        message: 'No products with category typo found',
+        migratedCount: 0
+      });
+    }
+    
+    // Update all products with typo to the correct category
+    const result = await Product.updateMany(
+      { category: { $in: typoVariants } },
+      { $set: { category: 'SNEKERS' } }
+    );
+    
+    // Log the migration
+    try {
+      await SystemLog.create({
+        action: 'category_typo_migration',
+        actor: req.user?.email || 'system',
+        actorType: 'admin',
+        details: { 
+          migratedCount: result.modifiedCount,
+          oldCategories: typoVariants,
+          newCategory: 'SNEKERS'
+        },
+        module: 'product'
+      });
+    } catch (logError) {
+      console.error('Failed to create migration log:', logError.message);
+    }
+    
+    res.status(200).json({
+      success: true,
+      message: `Successfully migrated ${result.modifiedCount} products from category typo to SNEKERS`,
+      migratedCount: result.modifiedCount
+    });
+  } catch (error) {
+    console.error('Error migrating category typo:', error);
+    res.status(500).json({
+      success: false,
+      message: 'Failed to migrate category typo'
+    });
+  }
+};
+
 
 
