@@ -8,6 +8,8 @@ const systemLogSchema = new mongoose.Schema({
       'user_login',
       'user_logout',
       'user_register',
+      'user_deactivated',
+      'user_reactivated',
       'user_role_updated',
       'payment_initiated',
       'payment_completed',
