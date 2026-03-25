@@ -34,6 +34,12 @@ const categorySchema = new mongoose.Schema({
   order: {
     type: Number,
     default: 0
+  },
+  // Parent category for hierarchical structure
+  parentCategory: {
+    type: mongoose.Schema.Types.ObjectId,
+    ref: 'Category',
+    default: null
   }
 }, {
   timestamps: true

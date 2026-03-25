@@ -499,5 +499,69 @@ export const migrateCategoryTypo = async (req, res) => {
   }
 };
 
+// Get Best Selling Products - aggregates sales data from orders
+export const getBestSellers = async (req, res) => {
+  try {
+    const { limit = 8 } = req.query;
+    
+    // Aggregate order items to find best selling products
+    const bestSellers = await Order.aggregate([
+      // Only consider paid orders
+      { $match: { isPaid: true } },
+      // Unwind order items to get individual products
+      { $unwind: '$orderItems' },
+      // Group by product and sum quantities
+      { $group: {
+        _id: '$orderItems.productId',
+        totalSold: { $sum: '$orderItems.quantity' }
+      }},
+      // Sort by total sold (descending)
+      { $sort: { totalSold: -1 } },
+      // Limit to requested number
+      { $limit: parseInt(limit) },
+      // Lookup product details
+      { $lookup: {
+        from: 'products',
+        localField: '_id',
+        foreignField: '_id',
+        as: 'product'
+      }},
+      // Unwind product array
+      { $unwind: '$product' },
+      // Project final shape
+      { $project: {
+        _id: '$product._id',
+        name: '$product.name',
+        price: '$product.price',
+        image: '$product.images',
+        category: '$product.category',
+        totalSold: 1
+      }}
+    ]);
+
+    // Transform products with active pricing
+    const transformedProducts = bestSellers.map(p => {
+      const productObj = p.image && p.image[0] ? p.image[0] : p.image;
+      return {
+        ...p,
+        activePrice: p.price,
+        originalPrice: p.price,
+        image: Array.isArray(productObj) ? productObj[0] : productObj
+      };
+    });
+
+    res.status(200).json({
+      success: true,
+      products: transformedProducts
+    });
+  } catch (error) {
+    console.error('Error fetching best sellers:', error);
+    res.status(500).json({
+      success: false,
+      message: 'Failed to fetch best sellers'
+    });
+  }
+};
+
 
 

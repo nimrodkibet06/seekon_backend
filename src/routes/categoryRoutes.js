@@ -108,7 +108,7 @@ router.get('/:id', async (req, res) => {
 // POST create new category - admin only
 router.post('/', authMiddleware, adminMiddleware, async (req, res) => {
   try {
-    const { name, description, image, subCategories, brands, order } = req.body;
+    const { name, description, image, subCategories, brands, order, parentCategory } = req.body;
     
     // Check if category already exists
     const existingCategory = await Category.findOne({ name: name.toUpperCase() });
@@ -122,7 +122,8 @@ router.post('/', authMiddleware, adminMiddleware, async (req, res) => {
       image,
       subCategories: subCategories || [],
       brands: brands || [],
-      order: order || 0
+      order: order || 0,
+      parentCategory: parentCategory || null
     });
     
     await category.save();
@@ -135,7 +136,7 @@ router.post('/', authMiddleware, adminMiddleware, async (req, res) => {
 // PUT update category - admin only
 router.put('/:id', authMiddleware, adminMiddleware, async (req, res) => {
   try {
-    const { name, description, image, subCategories, brands, isActive, order } = req.body;
+    const { name, description, image, subCategories, brands, isActive, order, parentCategory } = req.body;
     
     const category = await Category.findById(req.params.id);
     if (!category) {
@@ -149,6 +150,7 @@ router.put('/:id', authMiddleware, adminMiddleware, async (req, res) => {
     if (brands !== undefined) category.brands = brands;
     if (isActive !== undefined) category.isActive = isActive;
     if (order !== undefined) category.order = order;
+    if (parentCategory !== undefined) category.parentCategory = parentCategory || null;
     
     await category.save();
     res.json({ success: true, category });

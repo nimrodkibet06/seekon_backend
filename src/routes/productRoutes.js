@@ -7,7 +7,8 @@ import {
   deleteProduct,
   addReview,
   canUserReview,
-  migrateCategoryTypo
+  migrateCategoryTypo,
+  getBestSellers
 } from '../controllers/productController.js';
 import { authMiddleware, adminMiddleware } from '../middleware/auth.js';
 
@@ -15,6 +16,7 @@ const router = express.Router();
 
 // Public Routes (Everyone can see products)
 router.get('/', getAllProducts);
+router.get('/bestsellers', getBestSellers);
 router.get('/:id', getProduct);
 
 // Review Routes (Auth required - verified buyer check included)
