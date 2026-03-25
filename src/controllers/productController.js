@@ -465,7 +465,7 @@ export const migrateCategoryTypo = async (req, res) => {
     // Update all products with typo to the correct category
     const result = await Product.updateMany(
       { category: { $in: typoVariants } },
-      { $set: { category: 'SNEKERS' } }
+      { $set: { category: 'Sneakers' } }
     );
     
     // Log the migration
@@ -477,7 +477,7 @@ export const migrateCategoryTypo = async (req, res) => {
         details: { 
           migratedCount: result.modifiedCount,
           oldCategories: typoVariants,
-          newCategory: 'SNEKERS'
+          newCategory: 'Sneakers'
         },
         module: 'product'
       });
@@ -487,7 +487,7 @@ export const migrateCategoryTypo = async (req, res) => {
     
     res.status(200).json({
       success: true,
-      message: `Successfully migrated ${result.modifiedCount} products from category typo to SNEKERS`,
+      message: `Successfully migrated ${result.modifiedCount} products from category typo to Sneakers`,
       migratedCount: result.modifiedCount
     });
   } catch (error) {
