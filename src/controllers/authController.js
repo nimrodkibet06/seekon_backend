@@ -73,7 +73,8 @@ export const googleAuth = async (req, res) => {
         email,
         authProvider: 'google',
         profilePhoto: picture || '',
-        isVerified: true // Google emails are already verified
+        isVerified: true, // Google emails are already verified
+        isActive: true // Ensure new users are active
       });
     }
 
@@ -562,6 +563,14 @@ export const getMe = async (req, res) => {
       return res.status(404).json({
         success: false,
         message: 'User not found'
+      });
+    }
+
+    // Safety check: ensure user account is active
+    if (user.isActive === false) {
+      return res.status(403).json({
+        success: false,
+        message: 'Account deactivated'
       });
     }
 
