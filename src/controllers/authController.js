@@ -53,7 +53,7 @@ export const googleAuth = async (req, res) => {
       }
       
       // Check if user is active (soft delete check)
-      if (!user.isActive) {
+      if (user.isActive === false) {
         return res.status(403).json({
           success: false,
           message: 'This account has been deactivated. Please contact support.'
@@ -436,7 +436,7 @@ export const login = async (req, res) => {
     }
 
     // Check if user is active (soft delete check)
-    if (!user.isActive) {
+    if (user.isActive === false) {
       return res.status(403).json({
         success: false,
         message: 'This account has been deactivated. Please contact support.'
@@ -504,7 +504,7 @@ export const unifiedAuth = async (req, res) => {
       }
       
       // Check if user is active (soft delete check)
-      if (!user.isActive) {
+      if (user.isActive === false) {
         return res.status(403).json({
           success: false,
           message: 'This account has been deactivated. Please contact support.'
