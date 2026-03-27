@@ -4,6 +4,7 @@ import Admin from '../models/Admin.js';
 import User from '../models/User.js';
 import Product from '../models/Product.js';
 import Subscriber from '../models/Subscriber.js';
+import { getResendClient } from '../utils/email.js';
 import jwt from 'jsonwebtoken';
 
 const JWT_SECRET = process.env.JWT_SECRET || 'seekon_secret_key';
@@ -722,7 +723,6 @@ export const sendNewsletterBroadcast = async (req, res) => {
     }
 
     // Get Resend client
-    const { getResendClient } = await import('../utils/email.js');
     const resend = getResendClient();
 
     if (!resend) {

@@ -7,7 +7,7 @@ let resendChecked = false;
 const resendConfigured = isServiceConfigured('resend');
 
 // Load Resend client
-const getResendClient = () => {
+export const getResendClient = () => {
   if (resendClient) return resendClient;
   if (resendChecked) return null;
   
