@@ -3,6 +3,7 @@ import Order from '../models/Order.js';
 import Admin from '../models/Admin.js';
 import User from '../models/User.js';
 import Product from '../models/Product.js';
+import Subscriber from '../models/Subscriber.js';
 import jwt from 'jsonwebtoken';
 
 const JWT_SECRET = process.env.JWT_SECRET || 'seekon_secret_key';
@@ -690,6 +691,73 @@ export const cleanupAbandonedOrders = async (req, res) => {
       success: false,
       message: 'Failed to cleanup abandoned orders'
     });
+  }
+};
+
+// Get all subscribers
+export const getSubscribers = async (req, res) => {
+  try {
+    const subscribers = await Subscriber.find().sort({ createdAt: -1 });
+    res.status(200).json(subscribers);
+  } catch (error) {
+    console.error('Error fetching subscribers:', error);
+    res.status(500).json({ message: 'Failed to fetch subscribers' });
+  }
+};
+
+// Send newsletter broadcast to all subscribers
+export const sendNewsletterBroadcast = async (req, res) => {
+  const { subject, htmlBody } = req.body;
+  
+  if (!subject || !htmlBody) {
+    return res.status(400).json({ message: 'Subject and htmlBody are required' });
+  }
+  
+  try {
+    const subs = await Subscriber.find({ status: 'subscribed' });
+    const emails = subs.map(sub => sub.email);
+
+    if (emails.length === 0) {
+      return res.status(400).json({ message: 'No active subscribers found' });
+    }
+
+    // Get Resend client
+    const { getResendClient } = await import('../utils/email.js');
+    const resend = getResendClient();
+
+    if (!resend) {
+      console.log('\n📧 NEWSLETTER BROADCAST (Development Mode)');
+      console.log(`   Subject: ${subject}`);
+      console.log(`   Recipients: ${emails.length}`);
+      console.log(`   Body preview: ${htmlBody.substring(0, 100)}...`);
+      return res.status(200).json({ 
+        message: 'Broadcast logged (Development mode - no emails sent)',
+        recipientCount: emails.length 
+      });
+    }
+
+    // Send broadcast using Resend
+    const { data, error } = await resend.emails.send({
+      from: process.env.EMAIL_FROM || 'Seekon <noreply@seekonapparelglobal.com>',
+      to: emails,
+      subject: subject,
+      html: htmlBody,
+    });
+
+    if (error) {
+      console.error('Resend error:', error);
+      return res.status(400).json({ message: error.message });
+    }
+
+    console.log(`✅ Newsletter broadcast sent to ${emails.length} subscribers`);
+    res.status(200).json({ 
+      message: 'Broadcast sent successfully!', 
+      recipientCount: emails.length,
+      data 
+    });
+  } catch (error) {
+    console.error('Error sending newsletter broadcast:', error);
+    res.status(500).json({ message: 'Failed to send broadcast' });
   }
 };
 

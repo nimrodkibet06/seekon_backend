@@ -11,7 +11,9 @@ import {
   getTransaction,
   exportTransactions,
   getAnalytics,
-  cleanupAbandonedOrders
+  cleanupAbandonedOrders,
+  getSubscribers,
+  sendNewsletterBroadcast
 } from '../controllers/adminController.js';
 import {
   getAllUsers,
@@ -181,6 +183,10 @@ router.patch('/orders/:id/cancel', authMiddleware, cancelOrder);
 
 // Cleanup route
 router.delete('/cleanup-abandoned', authMiddleware, adminMiddleware, cleanupAbandonedOrders);
+
+// Newsletter/Subscriber routes
+router.get('/subscribers', authMiddleware, adminMiddleware, getSubscribers);
+router.post('/newsletter/broadcast', authMiddleware, adminMiddleware, sendNewsletterBroadcast);
 
 // Notification routes
 router.get('/notifications', authMiddleware, adminMiddleware, async (req, res) => {
