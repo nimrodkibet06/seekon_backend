@@ -108,7 +108,19 @@ router.get('/:id', async (req, res) => {
 // POST create new category - admin only
 router.post('/', authMiddleware, adminMiddleware, async (req, res) => {
   try {
-    const { name, description, image, subCategories, brands, order, parentCategory } = req.body;
+    const { name, description, image, subCategories, brands, order, parentCategories } = req.body;
+    
+    // Parse parentCategories if it comes as a stringified JSON array (from FormData)
+    let parsedParentCategories = [];
+    if (parentCategories) {
+      try {
+        parsedParentCategories = typeof parentCategories === 'string' 
+          ? JSON.parse(parentCategories) 
+          : parentCategories;
+      } catch (error) {
+        console.error('Failed to parse parentCategories:', error);
+      }
+    }
     
     // Check if category already exists
     const existingCategory = await Category.findOne({ name: name.toUpperCase() });
@@ -123,7 +135,7 @@ router.post('/', authMiddleware, adminMiddleware, async (req, res) => {
       subCategories: subCategories || [],
       brands: brands || [],
       order: order || 0,
-      parentCategory: parentCategory || null
+      parentCategories: parsedParentCategories
     });
     
     await category.save();
@@ -136,7 +148,19 @@ router.post('/', authMiddleware, adminMiddleware, async (req, res) => {
 // PUT update category - admin only
 router.put('/:id', authMiddleware, adminMiddleware, async (req, res) => {
   try {
-    const { name, description, image, subCategories, brands, isActive, order, parentCategory } = req.body;
+    const { name, description, image, subCategories, brands, isActive, order, parentCategories } = req.body;
+    
+    // Parse parentCategories if it comes as a stringified JSON array (from FormData)
+    let parsedParentCategories = undefined;
+    if (parentCategories !== undefined) {
+      try {
+        parsedParentCategories = typeof parentCategories === 'string' 
+          ? JSON.parse(parentCategories) 
+          : parentCategories;
+      } catch (error) {
+        console.error('Failed to parse parentCategories:', error);
+      }
+    }
     
     const category = await Category.findById(req.params.id);
     if (!category) {
@@ -150,7 +174,7 @@ router.put('/:id', authMiddleware, adminMiddleware, async (req, res) => {
     if (brands !== undefined) category.brands = brands;
     if (isActive !== undefined) category.isActive = isActive;
     if (order !== undefined) category.order = order;
-    if (parentCategory !== undefined) category.parentCategory = parentCategory || null;
+    if (parsedParentCategories !== undefined) category.parentCategories = parsedParentCategories;
     
     await category.save();
     res.json({ success: true, category });

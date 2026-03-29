@@ -13,11 +13,11 @@ const decrementInventory = async (orderItems) => {
     for (const item of orderItems) {
       const productId = item.product || item.productId || item._id;
       if (productId) {
-        // Decrement stock and get the updated product back
+        // Decrement stock AND increment sold count
         const updatedProduct = await Product.findByIdAndUpdate(
           productId,
-          { $inc: { stock: -item.quantity } },
-          { new: true } // Crucial: returns the document AFTER the decrement
+          { $inc: { stock: -item.quantity, sold: item.quantity } },
+          { new: true } // Returns the document AFTER the update
         );
 
         if (updatedProduct) {
