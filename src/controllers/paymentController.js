@@ -283,7 +283,8 @@ export const initiateMpesaPayment = async (req, res) => {
     const shortcode = process.env.SHORTCODE || process.env.DARAJA_BUSINESS_SHORTCODE || process.env.MPESA_SHORTCODE;
     
     // PRODUCTION: Use Railway callback URL
-    const CallBackURL = 'https://seekonbackend-production.up.railway.app/api/payment/mpesa-callback';
+    const baseUrl = process.env.BACKEND_URL || 'https://seekon-backend-production.up.railway.app';
+    const CallBackURL = `${baseUrl}/api/payment/mpesa-callback`;
     console.log('🎯 Using CallBackURL:', CallBackURL);
 
     // Determine base URL based on environment
@@ -374,7 +375,8 @@ export const initiateMpesaPayment = async (req, res) => {
 
 // M-Pesa Callback
 export const mpesaCallback = async (req, res) => {
-  console.log("🔥 ALERT: DARAJA CALLBACK HIT THE SERVER!");
+  console.log("🚨 MPESA CALLBACK RECEIVED:", JSON.stringify(req.body, null, 2));
+  console.log("� ALERT: DARAJA CALLBACK HIT THE SERVER!");
   console.log("📦 RAW PAYLOAD:", JSON.stringify(req.body, null, 2));
   console.log("📋 HEADERS:", JSON.stringify(req.headers, null, 2));
   try {
