@@ -1,4 +1,4 @@
-const webpush = require('web-push');
+import webpush from 'web-push';
 
 // Keys will be added to .env by the user
 webpush.setVapidDetails(
@@ -7,4 +7,4 @@ webpush.setVapidDetails(
   process.env.VAPID_PRIVATE_KEY
 );
 
-module.exports = webpush;
+export default webpush;
