@@ -9,7 +9,8 @@
     "start": "node src/server.js",
     "worker": "node src/workers/imageWorker.js",
     "start:all": "node src/server.js & node src/workers/imageWorker.js",
-    "create-admin": "node src/scripts/createAdmin.js"
+    "create-admin": "node src/scripts/createAdmin.js",
+    "clean-test-data": "node src/scripts/cleanTestData.js"
   },
   "keywords": [
     "seekon",
