@@ -1,6 +1,7 @@
 import Order from '../models/Order.js';
 import SystemLog from '../models/SystemLog.js';
 import Notification from '../models/Notification.js';
+import { sendPushNotificationToAdmins } from '../routes/notificationRoutes.js';
 
 // Create Order
 export const createOrder = async (req, res) => {
@@ -117,6 +118,16 @@ export const createOrder = async (req, res) => {
       console.log('✅ Admin notification created for new order!');
     } catch (notifError) {
       console.error('⚠️ Error creating notification:', notifError.message);
+    }
+
+    // Send push notification to admins
+    try {
+      await sendPushNotificationToAdmins(
+        'New Order!',
+        `An order was just placed for KSh ${order.totalAmount}`
+      );
+    } catch (pushError) {
+      console.error('⚠️ Error sending push notification:', pushError.message);
     }
 
     res.status(201).json({

@@ -95,6 +95,10 @@ const userSchema = new mongoose.Schema({
   otpExpires: {
     type: Date,
     default: null
+  },
+  pushSubscription: {
+    type: Object,
+    default: null
   }
 }, {
   timestamps: true
