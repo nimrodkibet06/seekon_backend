@@ -283,7 +283,7 @@ export const initiateMpesaPayment = async (req, res) => {
     const shortcode = process.env.SHORTCODE || process.env.DARAJA_BUSINESS_SHORTCODE || process.env.MPESA_SHORTCODE;
     
     // PRODUCTION: Use Railway callback URL
-    const baseUrl = process.env.BACKEND_URL || 'https://seekon-backend-production.up.railway.app';
+    const baseUrl = process.env.BACKEND_URL || 'https://seekonbackend-production-5aa7.up.railway.app';
     const CallBackURL = `${baseUrl}/api/payment/mpesa-callback`;
     console.log('🎯 Using CallBackURL:', CallBackURL);
 
