@@ -67,7 +67,6 @@ const sendPushNotificationToAdmins = async (title, message) => {
   }
 };
 
-export default router;
 export { sendPushNotificationToAdmins };
 
 // Get all notifications (admin only)
