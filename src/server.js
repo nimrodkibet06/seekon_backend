@@ -32,7 +32,7 @@ if (!isEnvValid) {
 const app = express();
 
 // Trust the first proxy (Railway/Load Balancer) to fix rate-limiting IP issues
-app.set('trust proxy', true);
+app.set('trust proxy', 1);
 
 // Get frontend URL from environment or use default
 const frontendUrl = process.env.FRONTEND_URL || 'https://seekon-front-end.vercel.app';
