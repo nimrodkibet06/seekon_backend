@@ -284,6 +284,169 @@ export const sendNewsletterWelcome = async (email) => {
   }
 };
 
+// Send Order Confirmation Email
+export const sendOrderConfirmationEmail = async (email, order) => {
+  const resend = getResendClient();
+  const frontendUrl = process.env.FRONTEND_URL || 'https://www.seekonapparelglobal.com';
+  
+  const itemsList = order.items.map(item => `
+    <tr>
+      <td style="padding: 10px; border-bottom: 1px solid #eee;">
+        <img src="${item.image || ''}" alt="${item.name}" style="width: 50px; height: 50px; object-fit: cover; border-radius: 5px;" />
+      </td>
+      <td style="padding: 10px; border-bottom: 1px solid #eee;">${item.name}</td>
+      <td style="padding: 10px; border-bottom: 1px solid #eee;">${item.quantity}</td>
+      <td style="padding: 10px; border-bottom: 1px solid #eee;">KSh ${item.price.toLocaleString()}</td>
+    </tr>
+  `).join('');
+
+  const orderHtml = `
+    <div style="font-family: Arial, sans-serif; max-width: 600px; margin: 0 auto; padding: 20px;">
+      <div style="text-align: center; margin-bottom: 30px;">
+        <h1 style="color: #00A676; margin: 0;">SEEKON</h1>
+        <p style="color: #666; margin: 5px 0 0 0;">Order Confirmation</p>
+      </div>
+      
+      <div style="background: #f9f9f9; padding: 20px; border-radius: 10px; margin-bottom: 20px;">
+        <p style="margin: 0 0 10px 0;"><strong>Order ID:</strong> ${order._id}</p>
+        <p style="margin: 0 0 10px 0;"><strong>Order Date:</strong> ${new Date(order.createdAt).toLocaleDateString()}</p>
+        <p style="margin: 0;"><strong>Payment Method:</strong> ${order.paymentMethod}</p>
+      </div>
+      
+      <table style="width: 100%; border-collapse: collapse; margin-bottom: 20px;">
+        <thead>
+          <tr style="background: #00A676; color: white;">
+            <th style="padding: 10px; text-align: left;">Product</th>
+            <th style="padding: 10px; text-align: left;">Name</th>
+            <th style="padding: 10px; text-align: left;">Qty</th>
+            <th style="padding: 10px; text-align: left;">Price</th>
+          </tr>
+        </thead>
+        <tbody>
+          ${itemsList}
+        </tbody>
+      </table>
+      
+      <div style="text-align: right; padding: 15px; background: #f4f4f4; border-radius: 8px;">
+        <p style="margin: 0; font-size: 18px;"><strong>Total: KSh ${order.totalAmount.toLocaleString()}</strong></p>
+      </div>
+      
+      ${order.shippingAddress ? `
+      <div style="margin-top: 20px; padding: 15px; background: #f9f9f9; border-radius: 8px;">
+        <h3 style="margin: 0 0 10px 0;">Shipping Address</h3>
+        <p style="margin: 0;">${order.shippingAddress.name}</p>
+        <p style="margin: 0;">${order.shippingAddress.phone}</p>
+        <p style="margin: 0;">${order.shippingAddress.address}</p>
+        <p style="margin: 0;">${order.shippingAddress.city}</p>
+      </div>
+      ` : ''}
+      
+      <div style="margin-top: 30px; text-align: center;">
+        <a href="${frontendUrl}/my-orders" style="display: inline-block; padding: 12px 24px; background-color: #00A676; color: white; text-decoration: none; border-radius: 6px;">Track Your Order</a>
+      </div>
+    </div>
+  `;
+
+  if (!resend) {
+    console.log(`\n📧 ORDER CONFIRMATION EMAIL\nTo: ${email}\nOrder ID: ${order._id}\nTotal: KSh ${order.totalAmount}\n(Development mode - no email sent)`);
+    return { success: true, development: true };
+  }
+
+  try {
+    await resend.emails.send({
+      from: 'Seekon <noreply@seekonapparelglobal.com>',
+      to: email,
+      subject: `Order Confirmed! - ${order._id}`,
+      html: orderHtml
+    });
+    console.log(`✅ Order confirmation email sent to ${email}`);
+    return { success: true };
+  } catch (error) {
+    console.error('❌ Error sending order confirmation:', error.message);
+    return { success: false };
+  }
+};
+
+// Send Order Status Update Email
+export const sendOrderStatusUpdateEmail = async (email, order, newStatus) => {
+  const resend = getResendClient();
+  const frontendUrl = process.env.FRONTEND_URL || 'https://www.seekonapparelglobal.com';
+  
+  const statusMessages = {
+    processing: 'Your order is being processed',
+    shipped: 'Your order has been shipped',
+    delivered: 'Your order has been delivered',
+    pending: 'Your order is pending payment'
+  };
+  
+  const statusEmojis = {
+    processing: '⚙️',
+    shipped: '🚚',
+    delivered: '✅',
+    pending: '⏳'
+  };
+
+  const statusHtml = `
+    <div style="font-family: Arial, sans-serif; max-width: 600px; margin: 0 auto; padding: 20px;">
+      <div style="text-align: center; margin-bottom: 30px;">
+        <h1 style="color: #00A676; margin: 0;">SEEKON</h1>
+        <p style="color: #666; margin: 5px 0 0 0;">Order Update</p>
+      </div>
+      
+      <div style="background: linear-gradient(135deg, #00A676, #008A5E); color: white; padding: 30px; border-radius: 15px; text-align: center; margin-bottom: 25px;">
+        <span style="font-size: 48px;">${statusEmojis[newStatus] || '📦'}</span>
+        <h2 style="margin: 15px 0 0 0;">${statusMessages[newStatus] || `Order status: ${newStatus}`}</h2>
+      </div>
+      
+      <div style="background: #f9f9f9; padding: 20px; border-radius: 10px; margin-bottom: 20px;">
+        <p style="margin: 0 0 10px 0;"><strong>Order ID:</strong> ${order._id}</p>
+        <p style="margin: 0 0 10px 0;"><strong>Current Status:</strong> <span style="text-transform: capitalize;">${newStatus}</span></p>
+        <p style="margin: 0;"><strong>Total Amount:</strong> KSh ${order.totalAmount.toLocaleString()}</p>
+      </div>
+      
+      ${order.expectedArrival ? `
+      <div style="padding: 15px; background: #e8f5e9; border-radius: 8px; margin-bottom: 20px;">
+        <p style="margin: 0;"><strong>Expected Arrival:</strong> ${new Date(order.expectedArrival).toLocaleDateString()}</p>
+      </div>
+      ` : ''}
+      
+      ${order.deliveryDetails ? `
+      <div style="padding: 15px; background: #e3f2fd; border-radius: 8px; margin-bottom: 20px;">
+        <h3 style="margin: 0 0 10px 0;">Delivery Information</h3>
+        <p style="margin: 0;">${order.deliveryDetails}</p>
+      </div>
+      ` : ''}
+      
+      <div style="text-align: center; margin-top: 30px;">
+        <a href="${frontendUrl}/my-orders" style="display: inline-block; padding: 12px 24px; background-color: #00A676; color: white; text-decoration: none; border-radius: 6px;">View Order Details</a>
+      </div>
+      
+      <p style="margin-top: 30px; color: #888; font-size: 12px; text-align: center;">
+        Thank you for shopping with Seekon!
+      </p>
+    </div>
+  `;
+
+  if (!resend) {
+    console.log(`\n📧 ORDER STATUS UPDATE EMAIL\nTo: ${email}\nOrder ID: ${order._id}\nStatus: ${newStatus}\n(Development mode - no email sent)`);
+    return { success: true, development: true };
+  }
+
+  try {
+    await resend.emails.send({
+      from: 'Seekon <noreply@seekonapparelglobal.com>',
+      to: email,
+      subject: `Order Update: ${statusMessages[newStatus] || newStatus} - ${order._id}`,
+      html: statusHtml
+    });
+    console.log(`✅ Order status update email sent to ${email}`);
+    return { success: true };
+  } catch (error) {
+    console.error('❌ Error sending order status update:', error.message);
+    return { success: false };
+  }
+};
+
 /**
  * Send welcome email to new registered users
  * @param {string} name - User's name

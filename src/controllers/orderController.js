@@ -2,6 +2,7 @@ import Order from '../models/Order.js';
 import SystemLog from '../models/SystemLog.js';
 import Notification from '../models/Notification.js';
 import { sendPushNotificationToAdmins } from '../routes/notificationRoutes.js';
+import { sendOrderConfirmationEmail, sendOrderStatusUpdateEmail } from '../utils/email.js';
 
 // Create Order
 export const createOrder = async (req, res) => {
@@ -30,15 +31,17 @@ export const createOrder = async (req, res) => {
       });
     }
     
-    // Get user email from database since JWT doesn't include email
+    // Get user email and name from database since JWT doesn't include email/name
     let userEmail = req.user?.email;
-    if (!userEmail) {
+    let userName = req.user?.name;
+    if (!userEmail || !userName) {
       try {
         const User = (await import('../models/User.js')).default;
-        const user = await User.findById(userId).select('email');
+        const user = await User.findById(userId).select('email name');
         userEmail = user?.email;
+        userName = user?.name;
       } catch (e) {
-        console.error('Error fetching user email:', e);
+        console.error('Error fetching user data:', e);
       }
     }
 
@@ -128,6 +131,13 @@ export const createOrder = async (req, res) => {
       );
     } catch (pushError) {
       console.error('⚠️ Error sending push notification:', pushError.message);
+    }
+
+    // Send confirmation email to customer (async - non-blocking)
+    if (userEmail) {
+      sendOrderConfirmationEmail(userEmail, order).catch(err => 
+        console.error('⚠️ Error sending order confirmation email:', err.message)
+      );
     }
 
     res.status(201).json({
@@ -284,6 +294,14 @@ export const updateOrderStatus = async (req, res) => {
       details: { orderId: order._id, status: newStatus },
       module: 'order'
     });
+
+    // Send status update email to customer (async - non-blocking)
+    const customerEmail = order.userEmail || order.user?.email;
+    if (customerEmail && newStatus) {
+      sendOrderStatusUpdateEmail(customerEmail, order, newStatus).catch(err =>
+        console.error('⚠️ Error sending order status update email:', err.message)
+      );
+    }
 
     res.status(200).json({
       success: true,
