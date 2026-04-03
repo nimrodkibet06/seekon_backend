@@ -133,11 +133,14 @@ export const createOrder = async (req, res) => {
       console.error('⚠️ Error sending push notification:', pushError.message);
     }
 
-    // Send confirmation email to customer (async - non-blocking)
+    // Send confirmation email to customer (Awaited to prevent cloud timeout)
     if (userEmail) {
-      sendOrderConfirmationEmail(userEmail, order).catch(err => 
+      console.log(`✉️ Attempting to send order confirmation to: ${userEmail}`);
+      await sendOrderConfirmationEmail(userEmail, order).catch(err => 
         console.error('⚠️ Error sending order confirmation email:', err.message)
       );
+    } else {
+      console.log('⚠️ Skipped confirmation email: No userEmail found for this order.');
     }
 
     res.status(201).json({
@@ -295,12 +298,16 @@ export const updateOrderStatus = async (req, res) => {
       module: 'order'
     });
 
-    // Send status update email to customer (async - non-blocking)
-    const customerEmail = order.userEmail || order.user?.email;
+    // Send status update email to customer (Awaited to prevent cloud timeout)
+    const customerEmail = order.userEmail || (order.user && order.user.email);
+    console.log(`✉️ Found customer email for update: ${customerEmail}`);
+    
     if (customerEmail && newStatus) {
-      sendOrderStatusUpdateEmail(customerEmail, order, newStatus).catch(err =>
+      await sendOrderStatusUpdateEmail(customerEmail, order, newStatus).catch(err =>
         console.error('⚠️ Error sending order status update email:', err.message)
       );
+    } else {
+      console.log('⚠️ Skipped status email: No customer email or new status found.');
     }
 
     res.status(200).json({
