@@ -8,14 +8,17 @@ if (!process.env.JWT_SECRET) {
   process.exit(1);
 }
 
+import mongoose from 'mongoose';
 import express from 'express';
 import cors from 'cors';
+import cron from 'node-cron';
 import { validateEnv } from './config/checkEnv.js';
 import { connectDB } from './config/db.js';
 import routes from './routes/index.js';
 import settingRoutes from './routes/settingRoutes.js';
 import path from 'path';
 import { fileURLToPath } from 'url';
+import { createBackupAndEmail } from './utils/backupService.js';
 
 // ES Module dirname fix
 const __filename = fileURLToPath(import.meta.url);
@@ -124,6 +127,22 @@ app.use('/api/settings', settingRoutes);
 // Error handling middleware
 app.use((err, req, res, next) => {
   console.error(err.stack);
+  
+  // Check for database connection errors
+  if (err.name === 'MongoServerSelectionError' || 
+      err.name === 'MongoTimeoutError' || 
+      err.message && (err.message.includes('Server selection failed') || 
+                      err.message.includes('connection') || 
+                      err.message.includes('timeout')) ||
+      mongoose.connection.readyState !== 1) {
+    console.warn('🛑 Database connection error detected - returning 503 Service Unavailable');
+    return res.status(503).json({
+      success: false,
+      message: 'Service Unavailable - Database Maintenance',
+      error: process.env.NODE_ENV === 'development' ? 'Database connection failed' : undefined
+    });
+  }
+  
   res.status(500).json({
     success: false,
     message: 'Something went wrong!',
@@ -154,6 +173,23 @@ const startServer = async () => {
       console.log(`🚀 Server running on port ${PORT}`);
       console.log(`📍 Environment: ${process.env.NODE_ENV}`);
       console.log(`✅ API URL: ${isProduction ? 'https://seekonbackend-production.up.railway.app' : 'http://localhost:' + PORT}`);
+      
+      // Schedule daily backup at 12:00 AM (midnight)
+      console.log('⏰ Scheduling daily MongoDB backup at 12:00 AM...');
+      cron.schedule('0 0 * * *', () => {
+        console.log('🕛 Running scheduled daily MongoDB backup...');
+        createBackupAndEmail().then(result => {
+          if (result.success) {
+            console.log('✅ Scheduled backup completed successfully');
+          } else {
+            console.error('❌ Scheduled backup failed:', result.error);
+          }
+        }).catch(err => {
+          console.error('❌ Scheduled backup encountered an error:', err.message);
+        });
+      }, {
+        timezone: 'Africa/Nairobi' // Using East Africa Time (EAT)
+      });
     });
     
   } catch (error) {
