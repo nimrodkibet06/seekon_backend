@@ -146,6 +146,20 @@ export const sendVerificationCode = async (req, res) => {
     if (!global.pendingRegistrations) {
       global.pendingRegistrations = new Map();
     }
+
+    // Security Patch: Prevent RAM Exhaustion (Memory Bomb)
+    if (global.pendingRegistrations && global.pendingRegistrations.size > 0) {
+      const now = Date.now();
+      for (const [key, value] of global.pendingRegistrations.entries()) {
+        if (now > value.expiresAt) {
+          global.pendingRegistrations.delete(key);
+        }
+      }
+      // Hard cap to prevent DoS attacks
+      if (global.pendingRegistrations.size > 2000) {
+          global.pendingRegistrations.clear(); 
+      }
+    }
     
     // Store OTP with 15 minute expiration
     global.pendingRegistrations.set(email, {

@@ -10,6 +10,8 @@ if (!process.env.JWT_SECRET) {
 
 import express from 'express';
 import cors from 'cors';
+import helmet from 'helmet';
+import rateLimit from 'express-rate-limit';
 import { validateEnv } from './config/checkEnv.js';
 import { connectDB } from './config/db.js';
 import routes from './routes/index.js';
@@ -44,12 +46,11 @@ app.options('*', cors({
     // Allow requests with no origin (like mobile apps, postman, or curl)
     if (!origin) return callback(null, true);
     
-    // Allow exact matches OR any Vercel preview/deployment URL dynamically
-    if (allowedOrigins.includes(origin) || origin.endsWith('.vercel.app')) {
+    // Allow exact matches only
+    if (allowedOrigins.includes(origin)) {
       callback(null, true);
     } else {
-      console.warn(`CORS preflight origin: ${origin} - allowing for development`);
-      callback(null, true); // Allow for now
+      callback(new Error('Not allowed by CORS'));
     }
   },
   credentials: true,
@@ -73,18 +74,31 @@ app.use(cors({
     // Allow requests with no origin (like mobile apps, postman, or curl)
     if (!origin) return callback(null, true);
     
-    // Allow exact matches OR any Vercel preview/deployment URL dynamically
-    if (allowedOrigins.includes(origin) || origin.endsWith('.vercel.app')) {
+    // Allow exact matches only
+    if (allowedOrigins.includes(origin)) {
       callback(null, true);
     } else {
-      console.warn(`CORS origin: ${origin} - allowing for development`);
-      callback(null, true); // Allow for now
+      callback(new Error('Not allowed by CORS'));
     }
   },
   credentials: true,
   methods: ['GET', 'POST', 'PUT', 'DELETE', 'PATCH', 'OPTIONS'],
   allowedHeaders: ['Content-Type', 'Authorization', 'X-Requested-With', 'Accept', 'Origin']
 }));
+
+// Global rate limiting - 100 requests per 15 minutes per IP
+const globalLimiter = rateLimit({
+  windowMs: 15 * 60 * 1000,
+  max: 100,
+  message: { success: false, message: 'Too many requests, please try again later.' },
+  standardHeaders: true,
+  legacyHeaders: false
+});
+app.use(globalLimiter);
+
+// Helmet for secure HTTP headers
+app.use(helmet());
+
 app.use(express.json());
 app.use(express.urlencoded({ extended: true }));
 

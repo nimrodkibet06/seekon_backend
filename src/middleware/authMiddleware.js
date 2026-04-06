@@ -26,12 +26,21 @@ const protect = asyncHandler(async (req, res, next) => {
       
       console.log('👤 User found:', req.user ? req.user.email : 'NULL');
 
-      // CRITICAL: Ensure user exists before proceeding
+      // CRITICAL: Ensure user exists and is active before proceeding
       if (!req.user) {
         console.error('🚨 User not found in database for ID:', userId);
         return res.status(401).json({ 
           success: false,
           message: 'User not found. Account may have been deleted.' 
+        });
+      }
+
+      // CRITICAL: Check if user is active (deactivated accounts cannot access)
+      if (req.user.isActive === false) {
+        console.error('🚨 User account is deactivated:', userId);
+        return res.status(401).json({ 
+          success: false,
+          message: 'User account has been deactivated.' 
         });
       }
 
