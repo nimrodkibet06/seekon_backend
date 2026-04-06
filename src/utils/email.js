@@ -447,6 +447,48 @@ export const sendOrderStatusUpdateEmail = async (email, order, newStatus) => {
   }
 };
 
+// Send Admin Notification Email
+export const sendAdminNotification = async (subject, message) => {
+  const resend = getResendClient();
+  const adminEmail = process.env.ADMIN_NOTIFY_EMAIL || process.env.ADMIN_EMAIL || 'support@seekonapparelglobal.com';
+
+  const html = `
+    <div style="font-family: Arial, sans-serif; max-width: 600px; margin: 0 auto; padding: 20px;">
+      <div style="text-align: center; margin-bottom: 30px;">
+        <h1 style="color: #dc2626; margin: 0;">SEEKON</h1>
+        <p style="color: #666; margin: 5px 0 0 0;">Admin Notification</p>
+      </div>
+      
+      <div style="background: #fef2f2; border: 2px solid #dc2626; padding: 20px; border-radius: 10px; margin-bottom: 20px;">
+        <p style="margin: 0; font-size: 18px; color: #111; font-weight: 600;">${message}</p>
+      </div>
+      
+      <p style="color: #888; font-size: 12px; text-align: center;">
+        Sent at ${new Date().toLocaleString()}
+      </p>
+    </div>
+  `;
+
+  if (!resend) {
+    console.log(`\n📧 ADMIN NOTIFICATION (Development)\nTo: ${adminEmail}\nSubject: ${subject}\nMessage: ${message}\n`);
+    return { success: true, development: true };
+  }
+
+  try {
+    const data = await resend.emails.send({
+      from: 'Seekon <noreply@seekonapparelglobal.com>',
+      to: adminEmail,
+      subject: subject,
+      html: html
+    });
+    console.log(`✅ Admin notification sent to ${adminEmail}:`, data);
+    return { success: true, data };
+  } catch (error) {
+    console.error('❌ Error sending admin notification:', error.message);
+    return { success: false, message: error.message };
+  }
+};
+
 /**
  * Send welcome email to new registered users
  * @param {string} name - User's name

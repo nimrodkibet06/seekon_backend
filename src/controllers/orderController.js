@@ -2,7 +2,7 @@ import Order from '../models/Order.js';
 import SystemLog from '../models/SystemLog.js';
 import Notification from '../models/Notification.js';
 import { sendPushNotificationToAdmins } from '../routes/notificationRoutes.js';
-import { sendOrderConfirmationEmail, sendOrderStatusUpdateEmail } from '../utils/email.js';
+import { sendOrderConfirmationEmail, sendOrderStatusUpdateEmail, sendAdminNotification } from '../utils/email.js';
 
 // Create Order
 export const createOrder = async (req, res) => {
@@ -139,6 +139,12 @@ export const createOrder = async (req, res) => {
         console.error('⚠️ Error sending order confirmation email:', err.message)
       );
     }
+
+    // Notify Admin of New Order (async - non-blocking)
+    const adminMsg = `A new order (#${order._id}) totaling KES ${order.totalAmount} has just been placed! Log into the admin dashboard to process it.`;
+    sendAdminNotification('🚨 New Order Received!', adminMsg).catch(err => 
+      console.error('⚠️ Error sending admin notification email:', err.message)
+    );
 
     res.status(201).json({
       success: true,
