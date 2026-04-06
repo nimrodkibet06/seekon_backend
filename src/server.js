@@ -135,13 +135,18 @@ app.use('/api', routes);
 // Settings routes - mounted directly with /api/settings prefix
 app.use('/api/settings', settingRoutes);
 
-// Error handling middleware
+// Global Error Handler (Must be the last middleware)
 app.use((err, req, res, next) => {
-  console.error(err.stack);
-  res.status(500).json({
+  console.error('🔥 CRITICAL ERROR:', err.stack);
+  
+  const statusCode = err.statusCode || 500;
+  const message = process.env.NODE_ENV === 'production' 
+    ? 'Something went wrong on our end. We are looking into it.' 
+    : err.message;
+
+  res.status(statusCode).json({
     success: false,
-    message: 'Something went wrong!',
-    error: process.env.NODE_ENV === 'development' ? err.message : undefined
+    message: message
   });
 });
 

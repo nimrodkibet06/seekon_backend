@@ -1,4 +1,5 @@
 import Order from '../models/Order.js';
+import Product from '../models/Product.js';
 import SystemLog from '../models/SystemLog.js';
 import Notification from '../models/Notification.js';
 import { sendPushNotificationToAdmins } from '../routes/notificationRoutes.js';
@@ -13,7 +14,6 @@ export const createOrder = async (req, res) => {
     
     const {
       items,
-      totalAmount,
       paymentMethod,
       shippingAddress,
       deliveryDate,
@@ -64,45 +64,37 @@ export const createOrder = async (req, res) => {
       postalCode: shippingAddress.zipCode
     } : {};
 
-    // CRITICAL FIX: Map productId from cart to product in order with aggressive logging
-    // Cart items use productId, Order uses product
-    console.log("🛒 BEFORE MAPPING - Raw Cart Items:", JSON.stringify(items));
-    
-    // Validate that we have items
-    if (!items || items.length === 0) {
-      return res.status(400).json({
-        success: false,
-        message: 'No order items found'
-      });
-    }
-    
-    // Ensure every single item in the loop gets its product ID attached
+    // SECURITY FIX: Recalculate prices server-side to prevent price manipulation
+    // Fetch current prices from database to prevent frontend manipulation
+    const productIds = items.map(item => item.product?._id || item.product || item.productId?._id || item.productId || item.id || item._id).filter(Boolean);
+    const products = await Product.find({ _id: { $in: productIds } }).select('name price image');
+    const productPriceMap = {};
+    products.forEach(p => { productPriceMap[p._id.toString()] = p; });
+
+    let calculatedTotal = 0;
     const orderItems = items.map(item => {
-      // Aggressively grab the ID whether it's populated or raw
       const extractedId = item.product?._id || item.product || item.productId?._id || item.productId || item.id || item._id;
-      
-      if (!extractedId) {
-        console.error("🚨 FATAL MAPPING ERROR: Missing ID for item:", item.name);
-      }
-      
+      const dbProduct = productPriceMap[extractedId];
+      const finalPrice = dbProduct ? dbProduct.price : (item.price || 0);
+      calculatedTotal += finalPrice * (item.quantity || 1);
       return {
-        product: extractedId, // THE FIX - ensure we always have an ID
-        name: item.name,
-        price: item.price,
-        quantity: item.quantity,
+        product: extractedId,
+        name: dbProduct?.name || item.name,
+        price: finalPrice,
+        quantity: item.quantity || 1,
         size: item.size,
         color: item.color,
-        image: item.image
+        image: dbProduct?.image || item.image
       };
     });
-    
-    console.log("✅ AFTER MAPPING - Order Items to Save:", JSON.stringify(orderItems));
+
+    console.log(`✅ Server-side price calculation: KSh ${calculatedTotal} (items: ${orderItems.length})`);
 
     const order = await Order.create({
       user: userId, // Can be null for guest checkout
       userEmail: userEmail,
       items: orderItems,
-      totalAmount: totalAmount || 0,
+      totalAmount: calculatedTotal,
       paymentMethod: normalizedPaymentMethod,
       shippingAddress: mappedShippingAddress,
       deliveryDate,
