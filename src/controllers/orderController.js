@@ -2,6 +2,7 @@ import Order from '../models/Order.js';
 import Product from '../models/Product.js';
 import SystemLog from '../models/SystemLog.js';
 import Notification from '../models/Notification.js';
+import User from '../models/User.js';
 import { sendPushNotificationToAdmins } from '../routes/notificationRoutes.js';
 import { sendOrderConfirmationEmail, sendOrderStatusUpdateEmail, sendAdminNotification } from '../utils/email.js';
 
@@ -134,9 +135,18 @@ export const createOrder = async (req, res) => {
 
     // Notify Admin of New Order (async - non-blocking)
     const adminMsg = `A new order (#${order._id}) totaling KES ${order.totalAmount} has just been placed! Log into the admin dashboard to process it.`;
-    sendAdminNotification('🚨 New Order Received!', adminMsg).catch(err => 
-      console.error('⚠️ Error sending admin notification email:', err.message)
-    );
+    try {
+      const admins = await User.find({ role: 'admin', isActive: true }).select('email');
+      const adminEmails = admins.map(admin => admin.email);
+      sendAdminNotification('🚨 New Order Received!', adminMsg, adminEmails).catch(err =>
+        console.error('⚠️ Error sending admin notification email:', err.message)
+      );
+    } catch (adminErr) {
+      console.error('⚠️ Error fetching admin users:', adminErr.message);
+      sendAdminNotification('🚨 New Order Received!', adminMsg).catch(err =>
+        console.error('⚠️ Error sending admin notification email:', err.message)
+      );
+    }
 
     res.status(201).json({
       success: true,

@@ -448,9 +448,15 @@ export const sendOrderStatusUpdateEmail = async (email, order, newStatus) => {
 };
 
 // Send Admin Notification Email
-export const sendAdminNotification = async (subject, message) => {
+export const sendAdminNotification = async (subject, message, adminEmails = null) => {
   const resend = getResendClient();
-  const adminEmail = process.env.ADMIN_NOTIFY_EMAIL || process.env.ADMIN_EMAIL || 'support@seekonapparelglobal.com';
+
+  let toField;
+  if (adminEmails && Array.isArray(adminEmails) && adminEmails.length > 0) {
+    toField = adminEmails.join(', ');
+  } else {
+    toField = process.env.ADMIN_NOTIFY_EMAIL || process.env.ADMIN_EMAIL || 'support@seekonapparelglobal.com';
+  }
 
   const html = `
     <div style="font-family: Arial, sans-serif; max-width: 600px; margin: 0 auto; padding: 20px;">
@@ -470,18 +476,18 @@ export const sendAdminNotification = async (subject, message) => {
   `;
 
   if (!resend) {
-    console.log(`\n📧 ADMIN NOTIFICATION (Development)\nTo: ${adminEmail}\nSubject: ${subject}\nMessage: ${message}\n`);
+    console.log(`\n📧 ADMIN NOTIFICATION (Development)\nTo: ${toField}\nSubject: ${subject}\nMessage: ${message}\n`);
     return { success: true, development: true };
   }
 
   try {
     const data = await resend.emails.send({
       from: 'Seekon <noreply@seekonapparelglobal.com>',
-      to: adminEmail,
+      to: toField,
       subject: subject,
       html: html
     });
-    console.log(`✅ Admin notification sent to ${adminEmail}:`, data);
+    console.log(`✅ Admin notification sent to ${toField}:`, data);
     return { success: true, data };
   } catch (error) {
     console.error('❌ Error sending admin notification:', error.message);
