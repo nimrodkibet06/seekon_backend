@@ -453,7 +453,7 @@ export const sendAdminNotification = async (subject, message, adminEmails = null
 
   let toField;
   if (adminEmails && Array.isArray(adminEmails) && adminEmails.length > 0) {
-    toField = adminEmails.join(', ');
+    toField = adminEmails;
   } else {
     toField = process.env.ADMIN_NOTIFY_EMAIL || process.env.ADMIN_EMAIL || 'support@seekonapparelglobal.com';
   }
