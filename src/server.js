@@ -37,54 +37,36 @@ const app = express();
 app.set('trust proxy', 1);
 
 // Get frontend URL from environment or use default
-const frontendUrl = process.env.FRONTEND_URL || 'https://seekon-front-end.vercel.app';
+const frontendUrl = process.env.FRONTEND_URL || 'https://www.seekonapparelglobal.com';
 console.log(`🌐 Frontend URL configured: ${frontendUrl}`);
 
-// ⚠️ CRITICAL: Handle CORS preflight requests FIRST - before any other middleware
-app.options('*', cors({
-  origin: function(origin, callback) {
-    // Allow requests with no origin (like mobile apps, postman, or curl)
-    if (!origin) return callback(null, true);
-    
-    // Allow exact matches only
-    if (allowedOrigins.includes(origin)) {
-      callback(null, true);
-    } else {
-      callback(new Error('Not allowed by CORS'));
-    }
-  },
-  credentials: true,
-  methods: ['GET', 'POST', 'PUT', 'DELETE', 'PATCH', 'OPTIONS'],
-  allowedHeaders: ['Content-Type', 'Authorization', 'X-Requested-With', 'Accept', 'Origin']
-}));
-
-// CORS configuration - explicitly allow production frontend and Vercel
+// Whitelist allowed domains (must be defined before any cors() middleware)
 const allowedOrigins = [
   'https://www.seekonapparelglobal.com',
   'https://seekonapparelglobal.com',
-  'https://seekonbackend-production.up.railway.app',
   'http://localhost:5173',
   'http://localhost:5177',
   'http://localhost:3000',
-  process.env.FRONTEND_URL
+  frontendUrl,
 ].filter(Boolean);
 
-app.use(cors({
-  origin: function(origin, callback) {
-    // Allow requests with no origin (like mobile apps, postman, or curl)
-    if (!origin) return callback(null, true);
-    
-    // Allow exact matches only
-    if (allowedOrigins.includes(origin)) {
+const corsOptions = {
+  origin(origin, callback) {
+    if (!origin || allowedOrigins.indexOf(origin) !== -1) {
       callback(null, true);
     } else {
-      callback(new Error('Not allowed by CORS'));
+      console.warn(`CORS blocked origin: ${origin}`);
+      callback(null, false);
     }
   },
   credentials: true,
   methods: ['GET', 'POST', 'PUT', 'DELETE', 'PATCH', 'OPTIONS'],
-  allowedHeaders: ['Content-Type', 'Authorization', 'X-Requested-With', 'Accept', 'Origin']
-}));
+  allowedHeaders: ['Content-Type', 'Authorization', 'X-Requested-With', 'Accept', 'Origin'],
+};
+
+// Handle preflight before other middleware
+app.options('*', cors(corsOptions));
+app.use(cors(corsOptions));
 
 // Global rate limiting - 100 requests per 15 minutes per IP
 const globalLimiter = rateLimit({
