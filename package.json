@@ -10,7 +10,9 @@
     "worker": "node src/workers/imageWorker.js",
     "start:all": "node src/server.js & node src/workers/imageWorker.js",
     "create-admin": "node src/scripts/createAdmin.js",
-    "clean-test-data": "node src/scripts/cleanTestData.js"
+    "clean-test-data": "node src/scripts/cleanTestData.js",
+    "seed:smart": "node SmartSeed.js",
+    "seed:stock": "node updateStock.js"
   },
   "keywords": [
     "seekon",
