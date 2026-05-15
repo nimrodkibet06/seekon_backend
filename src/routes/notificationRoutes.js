@@ -2,7 +2,7 @@ import express from 'express';
 import Notification from '../models/Notification.js';
 import User from '../models/User.js';
 import { authMiddleware, adminMiddleware } from '../middleware/auth.js';
-import webpush from '../utils/webPush.js';
+import webpush, { isPushConfigured } from '../utils/webPush.js';
 
 const router = express.Router();
 
@@ -42,14 +42,22 @@ router.post('/push/subscribe', authMiddleware, adminMiddleware, async (req, res)
 
 // Get VAPID public key for frontend
 router.get('/push/vapid-public-key', (req, res) => {
+  if (!isPushConfigured()) {
+    return res.status(503).json({
+      success: false,
+      message: 'Push notifications are not configured on the server',
+      publicKey: '',
+    });
+  }
   res.status(200).json({
     success: true,
-    publicKey: process.env.VAPID_PUBLIC_KEY || ''
+    publicKey: process.env.VAPID_PUBLIC_KEY,
   });
 });
 
 // Send push notification to all admins
 const sendPushNotificationToAdmins = async (title, message) => {
+  if (!isPushConfigured()) return;
   try {
     const admins = await User.find({ role: 'admin', pushSubscription: { $ne: null } });
     

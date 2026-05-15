@@ -91,18 +91,21 @@ app.options('*', cors(corsOptions));
 app.use(cors(corsOptions));
 >>>>>>> ba2c2b96742f928e3c032036e68f80e1630a2696
 
-// Global rate limiting - 100 requests per 15 minutes per IP
+// Global rate limiting - skip OPTIONS so preflight always gets CORS headers
 const globalLimiter = rateLimit({
   windowMs: 15 * 60 * 1000,
   max: 100,
+  skip: (req) => req.method === 'OPTIONS',
   message: { success: false, message: 'Too many requests, please try again later.' },
   standardHeaders: true,
-  legacyHeaders: false
+  legacyHeaders: false,
 });
 app.use(globalLimiter);
 
-// Helmet for secure HTTP headers
-app.use(helmet());
+// Helmet — cross-origin policy must not block browser API calls from the storefront
+app.use(helmet({
+  crossOriginResourcePolicy: { policy: 'cross-origin' },
+}));
 
 app.use(express.json());
 app.use(express.urlencoded({ extended: true }));
@@ -177,7 +180,7 @@ const startServer = async () => {
       const isProduction = process.env.NODE_ENV === 'production';
       console.log(`🚀 Server running on port ${PORT}`);
       console.log(`📍 Environment: ${process.env.NODE_ENV}`);
-      console.log(`✅ API URL: ${isProduction ? 'https://seekonbackend-production.up.railway.app' : 'http://localhost:' + PORT}`);
+      console.log(`✅ API URL: ${isProduction ? 'https://seekonbackend-production-da47.up.railway.app' : 'http://localhost:' + PORT}`);
     });
     
   } catch (error) {
