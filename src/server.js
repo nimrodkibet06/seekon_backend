@@ -14,6 +14,7 @@ import helmet from 'helmet';
 import rateLimit from 'express-rate-limit';
 import { validateEnv } from './config/checkEnv.js';
 import { connectDB } from './config/db.js';
+import { startBackupScheduler } from './services/backupService.js';
 import routes from './routes/index.js';
 import settingRoutes from './routes/settingRoutes.js';
 import path from 'path';
@@ -165,6 +166,9 @@ const startServer = async () => {
   try {
     // Connect to database
     await connectDB();
+
+    // Nightly full MongoDB backup → Resend email (00:00 server time)
+    startBackupScheduler();
     
     // Start listening
     app.listen(PORT, () => {
