@@ -1,35 +1,32 @@
 import express from 'express';
 import rateLimit from 'express-rate-limit';
 import {
-  initiateMpesaPayment,
+  initializePaystackPayment,
+  verifyPaystackPayment,
   initiateFlutterwavePayment,
-  mpesaCallback,
   flutterwaveCallback,
-  getUserTransactions,
-  queryMpesaTransaction
+  getUserTransactions
 } from '../controllers/paymentController.js';
 import { authMiddleware } from '../middleware/auth.js';
 
 const router = express.Router();
 
-// Rate limiter for STK push - prevent spam/harassment
-const stkLimiter = rateLimit({
+// Rate limiter for payment initialization - prevent spam/harassment
+const paymentLimiter = rateLimit({
   windowMs: 1 * 60 * 1000, // 1 minute
   max: 3, // 3 requests per minute per IP
   message: { message: "Too many payment requests. Please wait a minute and try again." }
 });
 
-// All payment routes except callbacks require authentication
-router.post('/mpesa', authMiddleware, stkLimiter, initiateMpesaPayment);
-router.post('/stk-push', authMiddleware, stkLimiter, initiateMpesaPayment); // Alias for frontend compatibility
-router.post('/mpesa/query', authMiddleware, queryMpesaTransaction);
-router.post('/flutterwave', authMiddleware, initiateFlutterwavePayment);
+// Paystack payment routes
+router.post('/paystack/initialize', authMiddleware, paymentLimiter, initializePaystackPayment);
+router.get('/paystack/verify', verifyPaystackPayment);
 
-// Callback routes - NO auth middleware - Safaricom & Flutterwave do NOT send auth headers
-// These webhooks come directly from payment providers
-router.post('/mpesa-callback', mpesaCallback);
+// Flutterwave routes (keeping existing)
+router.post('/flutterwave', authMiddleware, paymentLimiter, initiateFlutterwavePayment);
 router.get('/flutterwave-callback', flutterwaveCallback);
 
+// Get user transactions
 router.get('/transactions/:userEmail', authMiddleware, getUserTransactions);
 
 export default router;

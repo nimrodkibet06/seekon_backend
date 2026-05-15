@@ -1,8 +1,8 @@
 import webpush from 'web-push';
 
-// Keys will be added to .env by the user
+// Configure VAPID keys for web push notifications
 webpush.setVapidDetails(
-  'mailto:admin@seekon.com',
+  process.env.VAPID_SUBJECT || 'mailto:admin@seekon.com',
   process.env.VAPID_PUBLIC_KEY,
   process.env.VAPID_PRIVATE_KEY
 );

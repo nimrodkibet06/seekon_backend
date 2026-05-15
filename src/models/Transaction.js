@@ -11,7 +11,7 @@ const transactionSchema = new mongoose.Schema({
   },
   method: {
     type: String,
-    enum: ['mpesa', 'card', 'flutterwave'],
+    enum: ['mpesa', 'card', 'flutterwave', 'paystack'],
     required: true
   },
   amount: {
@@ -33,6 +33,10 @@ const transactionSchema = new mongoose.Schema({
     default: null
   },
   flutterwaveResponse: {
+    type: mongoose.Schema.Types.Mixed,
+    default: null
+  },
+  paystackResponse: {
     type: mongoose.Schema.Types.Mixed,
     default: null
   },
