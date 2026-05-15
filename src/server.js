@@ -37,7 +37,7 @@ const app = express();
 app.set('trust proxy', 1);
 
 // Get frontend URL from environment or use default
-const frontendUrl = process.env.FRONTEND_URL || 'https://seekon-front-end.vercel.app';
+const frontendUrl = process.env.FRONTEND_URL || 'https://www.seekonapparelglobal.com';
 console.log(`🌐 Frontend URL configured: ${frontendUrl}`);
 
 // Whitelist your allowed domains
@@ -70,6 +70,26 @@ app.use(cors({
   },
   credentials: true
 }));
+    if (!origin || allowedOrigins.indexOf(origin) !== -1) {
+      callback(null, true);
+    } else {
+      console.warn(`CORS blocked origin: ${origin}`);
+      callback(null, false);
+    }
+  },
+<<<<<<< HEAD
+  credentials: true
+}));
+=======
+  credentials: true,
+  methods: ['GET', 'POST', 'PUT', 'DELETE', 'PATCH', 'OPTIONS'],
+  allowedHeaders: ['Content-Type', 'Authorization', 'X-Requested-With', 'Accept', 'Origin'],
+};
+
+// Handle preflight before other middleware
+app.options('*', cors(corsOptions));
+app.use(cors(corsOptions));
+>>>>>>> ba2c2b96742f928e3c032036e68f80e1630a2696
 
 // Global rate limiting - 100 requests per 15 minutes per IP
 const globalLimiter = rateLimit({
