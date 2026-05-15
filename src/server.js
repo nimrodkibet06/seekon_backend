@@ -40,36 +40,18 @@ app.set('trust proxy', 1);
 const frontendUrl = process.env.FRONTEND_URL || 'https://www.seekonapparelglobal.com';
 console.log(`🌐 Frontend URL configured: ${frontendUrl}`);
 
-// Whitelist your allowed domains
+// Whitelist allowed domains (must be defined before any cors() middleware)
 const allowedOrigins = [
-  'https://www.seekonapparelglobal.com', 
-  'https://seekonapparelglobal.com', 
-  'http://localhost:5173', // For local Vite testing
-  'http://localhost:3000'  // For local React testing
-];
+  'https://www.seekonapparelglobal.com',
+  'https://seekonapparelglobal.com',
+  'http://localhost:5173',
+  'http://localhost:5177',
+  'http://localhost:3000',
+  frontendUrl,
+].filter(Boolean);
 
-// ⚠️ CRITICAL: Handle CORS preflight requests FIRST - before any other middleware
-app.options('*', cors({
-  origin: function (origin, callback) {
-    if (!origin || allowedOrigins.indexOf(origin) !== -1) {
-      callback(null, true);
-    } else {
-      callback(new Error('Not allowed by CORS'));
-    }
-  },
-  credentials: true
-}));
-
-app.use(cors({
-  origin: function (origin, callback) {
-    if (!origin || allowedOrigins.indexOf(origin) !== -1) {
-      callback(null, true);
-    } else {
-      callback(new Error('Not allowed by CORS'));
-    }
-  },
-  credentials: true
-}));
+const corsOptions = {
+  origin(origin, callback) {
     if (!origin || allowedOrigins.indexOf(origin) !== -1) {
       callback(null, true);
     } else {
@@ -77,10 +59,6 @@ app.use(cors({
       callback(null, false);
     }
   },
-<<<<<<< HEAD
-  credentials: true
-}));
-=======
   credentials: true,
   methods: ['GET', 'POST', 'PUT', 'DELETE', 'PATCH', 'OPTIONS'],
   allowedHeaders: ['Content-Type', 'Authorization', 'X-Requested-With', 'Accept', 'Origin'],
@@ -89,7 +67,6 @@ app.use(cors({
 // Handle preflight before other middleware
 app.options('*', cors(corsOptions));
 app.use(cors(corsOptions));
->>>>>>> ba2c2b96742f928e3c032036e68f80e1630a2696
 
 // Global rate limiting - skip OPTIONS so preflight always gets CORS headers
 const globalLimiter = rateLimit({
