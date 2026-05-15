@@ -107,9 +107,11 @@ export const initializePaystackPayment = async (req, res) => {
     });
   } catch (error) {
     console.error('Paystack Init Error:', error.response?.data || error.message);
+    const paystackMessage = error.response?.data?.message;
     res.status(500).json({
       success: false,
-      message: 'Payment initialization failed'
+      message: paystackMessage || 'Payment initialization failed',
+      code: error.response?.data?.code || null
     });
   }
 };

@@ -90,7 +90,7 @@ export const getHomeSettings = async (req, res) => {
     const settings = await Setting.findOne({ key: 'homePage' });
     // Default values for a new setup
     const defaults = {
-      heroVideoUrl: "https://res.cloudinary.com/demo/video/upload/v1689264426/running_shoes_promo.mp4",
+      heroVideoUrl: "",
       heroHeading: "STEP INTO THE FUTURE",
       heroSubtitle: "Discover the latest drops from Nike, Adidas, Jordan, and more.",
       heroOverlayOpacity: 50, // 0-100%

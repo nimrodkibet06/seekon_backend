@@ -68,11 +68,25 @@ const corsOptions = {
 app.options('*', cors(corsOptions));
 app.use(cors(corsOptions));
 
-// Global rate limiting - skip OPTIONS so preflight always gets CORS headers
+// Global rate limiting — SPAs fire many parallel GETs on load; keep strict limits on writes/auth
 const globalLimiter = rateLimit({
   windowMs: 15 * 60 * 1000,
-  max: 100,
-  skip: (req) => req.method === 'OPTIONS',
+  max: 300,
+  skip: (req) => {
+    if (req.method === 'OPTIONS') return true;
+    const path = req.originalUrl || req.path || '';
+    if (req.method === 'GET' && (
+      path.startsWith('/api/settings') ||
+      path.startsWith('/api/products') ||
+      path.startsWith('/api/categories') ||
+      path === '/api/auth/me' ||
+      path === '/health' ||
+      path === '/'
+    )) {
+      return true;
+    }
+    return false;
+  },
   message: { success: false, message: 'Too many requests, please try again later.' },
   standardHeaders: true,
   legacyHeaders: false,
