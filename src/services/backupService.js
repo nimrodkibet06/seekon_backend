@@ -1,6 +1,5 @@
 import mongoose from 'mongoose';
 import {
-  getDriveClient,
   isDriveConfigured,
   uploadBackupToDrive,
   pruneOldBackups,
@@ -70,11 +69,6 @@ export const runFullBackup = async () => {
 
   if (!isDriveConfigured()) {
     console.warn('[Backup] Skipped: Google Drive is not configured');
-    return;
-  }
-
-  if (!getDriveClient()) {
-    console.warn('[Backup] Skipped: Drive client unavailable');
     return;
   }
 
