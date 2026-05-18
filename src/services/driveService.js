@@ -1,5 +1,4 @@
 import { google } from 'googleapis';
-import { Readable } from 'stream';
 
 let driveClient = null;
 let authClient = null;
@@ -72,11 +71,19 @@ const ensureDriveClients = async () => {
       throw new Error('Service account JSON must include client_email and private_key');
     }
 
+    const impersonateEmail = process.env.GOOGLE_DRIVE_IMPERSONATE_EMAIL?.trim();
+
     authClient = new google.auth.JWT({
       email: credentials.client_email,
       key: privateKey,
       scopes: [DRIVE_SCOPE],
+      // Optional: Google Workspace domain-wide delegation (uploads as this user)
+      ...(impersonateEmail ? { subject: impersonateEmail } : {}),
     });
+
+    if (impersonateEmail) {
+      console.log(`[Drive] Using domain-wide delegation as ${impersonateEmail}`);
+    }
 
     await authClient.authorize();
 
@@ -130,11 +137,65 @@ const assertBackupFolderAccessible = async (drive, auth, folderId) => {
 export const getDriveClient = () => driveClient;
 
 /**
+ * Resumable upload: metadata (with parents) is sent first, then bytes.
+ * Avoids googleapis multipart stripping parents AND files.update() SA quota errors.
+ * @see https://developers.google.com/workspace/drive/api/guides/manage-uploads#resumable
+ */
+const uploadViaResumableSession = async (auth, folderId, filename, jsonString) => {
+  const { token } = await auth.getAccessToken();
+  if (!token) {
+    throw new Error('Failed to obtain Google access token');
+  }
+
+  const metadata = {
+    name: filename,
+    mimeType: 'application/json',
+    parents: [folderId],
+  };
+
+  const initResponse = await fetch(
+    'https://www.googleapis.com/upload/drive/v3/files?uploadType=resumable&supportsAllDrives=true',
+    {
+      method: 'POST',
+      headers: {
+        Authorization: `Bearer ${token}`,
+        'Content-Type': 'application/json; charset=UTF-8',
+      },
+      body: JSON.stringify(metadata),
+    }
+  );
+
+  if (!initResponse.ok) {
+    const errText = await initResponse.text();
+    throw new Error(`Resumable session failed (${initResponse.status}): ${errText}`);
+  }
+
+  const uploadUrl = initResponse.headers.get('location');
+  if (!uploadUrl) {
+    throw new Error('Resumable upload missing Location header from Google');
+  }
+
+  const contentBuffer = Buffer.from(jsonString, 'utf-8');
+
+  const uploadResponse = await fetch(uploadUrl, {
+    method: 'PUT',
+    headers: {
+      'Content-Type': 'application/json',
+      'Content-Length': String(contentBuffer.length),
+    },
+    body: contentBuffer,
+  });
+
+  if (!uploadResponse.ok) {
+    const errText = await uploadResponse.text();
+    throw new Error(`Resumable upload failed (${uploadResponse.status}): ${errText}`);
+  }
+
+  return uploadResponse.json();
+};
+
+/**
  * Upload JSON backup into the shared folder (uses folder owner's quota, not SA storage).
- *
- * Two-step upload: multipart create() can drop `parents` and hit SA quota.
- * 1) Create metadata-only file inside Nick's folder (parents enforced).
- * 2) Stream JSON content into that file via files.update().
  */
 export const uploadBackupToDrive = async (backup, filename) => {
   const folderId = getBackupFolderId();
@@ -147,49 +208,26 @@ export const uploadBackupToDrive = async (backup, filename) => {
   await assertBackupFolderAccessible(drive, auth, folderId);
 
   const jsonString = JSON.stringify(backup, null, 2);
-  const dataStream = Readable.from(jsonString);
   const sizeMb = (Buffer.byteLength(jsonString, 'utf-8') / (1024 * 1024)).toFixed(2);
 
-  // Step 1: Place empty file in shared folder (uses folder owner quota, not SA root)
-  const { data: created } = await drive.files.create({
-    auth,
-    requestBody: {
-      name: filename,
-      mimeType: 'application/json',
-      parents: [folderId],
-    },
-    fields: 'id, name, parents, webViewLink',
-    supportsAllDrives: true,
-    keepRevisionForever: false,
-  });
+  console.log(`[Drive] Starting resumable upload to folder ${folderId}...`);
 
-  if (!created.parents?.includes(folderId)) {
-    await drive.files
-      .delete({ auth, fileId: created.id, supportsAllDrives: true })
-      .catch(() => {});
-    throw new Error(
-      `Drive file was not created inside folder ${folderId} (parents: ${JSON.stringify(created.parents)}). ` +
-        'Check that the folder is shared with the service account as Editor.'
+  const data = await uploadViaResumableSession(auth, folderId, filename, jsonString);
+
+  if (!data.parents?.includes(folderId)) {
+    console.warn(
+      `[Drive] Upload OK but parents=${JSON.stringify(data.parents)} — expected ${folderId}`
     );
   }
 
-  console.log(`[Drive] File shell created in "${folderId}" — id: ${created.id}`);
-
-  // Step 2: Upload JSON payload into the file already living in Nick's folder
-  const { data } = await drive.files.update({
-    auth,
-    fileId: created.id,
-    media: {
-      mimeType: 'application/json',
-      body: dataStream,
-    },
-    fields: 'id, name, createdTime, webViewLink, parents',
-    supportsAllDrives: true,
-  });
-
   console.log(`[Drive] Uploaded ${data.name} (${sizeMb} MB) into folder ${folderId} — id: ${data.id}`);
 
-  return { fileId: data.id, filename: data.name, sizeMb, webViewLink: data.webViewLink };
+  return {
+    fileId: data.id,
+    filename: data.name || filename,
+    sizeMb,
+    webViewLink: data.webViewLink,
+  };
 };
 
 /**
