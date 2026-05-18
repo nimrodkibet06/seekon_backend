@@ -1,4 +1,5 @@
 import { google } from 'googleapis';
+import { Readable } from 'stream';
 
 let driveClient = null;
 let authClient = null;
@@ -141,9 +142,8 @@ export const uploadBackupToDrive = async (backup, filename) => {
   const { drive, auth } = await ensureDriveClients();
   await assertBackupFolderAccessible(drive, auth, folderId);
 
-  const json = JSON.stringify(backup, null, 2);
-  const buffer = Buffer.from(json, 'utf-8');
-  const sizeMb = (buffer.length / (1024 * 1024)).toFixed(2);
+  const jsonString = JSON.stringify(backup, null, 2);
+  const sizeMb = (Buffer.byteLength(jsonString, 'utf-8') / (1024 * 1024)).toFixed(2);
 
   // parents is required — without it Google tries to store in the SA's empty quota
   const { data } = await drive.files.create({
@@ -154,7 +154,7 @@ export const uploadBackupToDrive = async (backup, filename) => {
     },
     media: {
       mimeType: 'application/json',
-      body: buffer,
+      body: Readable.from(jsonString),
     },
     fields: 'id, name, createdTime, webViewLink, parents',
     supportsAllDrives: true,
