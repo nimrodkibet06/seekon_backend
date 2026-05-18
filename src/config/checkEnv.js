@@ -31,7 +31,9 @@ const OPTIONAL_VARS = [
   { key: 'CLOUDINARY_API_KEY', name: 'Cloudinary API Key', description: 'API key for Cloudinary' },
   { key: 'CLOUDINARY_API_SECRET', name: 'Cloudinary API Secret', description: 'API secret for Cloudinary' },
   { key: 'RESEND_API_KEY', name: 'Resend API Key', description: 'API key for Resend email service' },
-  { key: 'GEMINI_API_KEY', name: 'Gemini AI API Key', description: 'API key for Seekon AI Shopping Assistant' }
+  { key: 'GEMINI_API_KEY', name: 'Gemini AI API Key', description: 'API key for Seekon AI Shopping Assistant' },
+  { key: 'GOOGLE_DRIVE_CREDENTIALS', name: 'Google Drive Credentials', description: 'Service account JSON for Drive backups' },
+  { key: 'GOOGLE_DRIVE_FOLDER_ID', name: 'Google Drive Folder ID', description: 'Target folder for backup JSON files' }
 ];
 
 /**
@@ -99,6 +101,7 @@ export const isServiceConfigured = (serviceName) => {
     cloudinary: ['CLOUDINARY_CLOUD_NAME', 'CLOUDINARY_API_KEY', 'CLOUDINARY_API_SECRET'],
     email: ['EMAIL_USER', 'EMAIL_PASS'],
     resend: ['RESEND_API_KEY'],
+    googleDrive: ['GOOGLE_DRIVE_CREDENTIALS', 'GOOGLE_DRIVE_FOLDER_ID'],
     mongodb: ['MONGO_URI'],
     jwt: ['JWT_SECRET'],
     gemini: ['GEMINI_API_KEY']

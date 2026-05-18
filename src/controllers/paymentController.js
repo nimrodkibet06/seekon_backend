@@ -6,6 +6,7 @@ import Product from '../models/Product.js';
 import Coupon from '../models/Coupon.js';
 import crypto from 'crypto';
 import axios from 'axios';
+import { scheduleDebouncedBackup } from '../services/backupService.js';
 
 // Helper function to decrement inventory on successful payment
 const decrementInventory = async (orderItems) => {
@@ -223,6 +224,9 @@ export const verifyPaystackPayment = async (req, res) => {
       } catch (notifError) {
         console.error('⚠️ Error creating notification:', notifError.message);
       }
+
+      // Non-blocking: debounced full DB backup → Google Drive (5 min idle batching)
+      scheduleDebouncedBackup();
 
       res.status(200).json({
         success: true,

@@ -1,30 +1,20 @@
-import cron from 'node-cron';
 import mongoose from 'mongoose';
-import { getResendClient } from '../utils/email.js';
+import {
+  getDriveClient,
+  isDriveConfigured,
+  uploadBackupToDrive,
+  pruneOldBackups,
+} from './driveService.js';
 
-const BACKUP_RECIPIENTS = [
-  'Nimrodkibet376@gmail.com',
-  'seekonapparel77@gmail.com',
-];
+const DEBOUNCE_MS = 5 * 60 * 1000; // 5 minutes idle after last successful transaction
+const RETENTION_DAYS = Number(process.env.BACKUP_RETENTION_DAYS) || 30;
 
-const EMAIL_FROM = process.env.EMAIL_FROM || 'Seekon <noreply@seekonapparelglobal.com>';
-
+let backupTimeout = null;
 let backupInProgress = false;
-let scheduledTask = null;
-
-const formatBackupDate = (date) =>
-  date.toLocaleDateString('en-GB', {
-    year: 'numeric',
-    month: 'long',
-    day: 'numeric',
-  });
 
 const formatFileTimestamp = (date) =>
   date.toISOString().replace(/[:.]/g, '-');
 
-/**
- * Build a safe summary for logging (counts only, no document bodies or secrets).
- */
 const buildBackupSummary = (backup) => {
   const collections = Object.keys(backup.data);
   return {
@@ -43,7 +33,7 @@ const buildBackupSummary = (backup) => {
 };
 
 /**
- * Export every collection dynamically (no hardcoded models).
+ * Dynamically export all MongoDB collections (no hardcoded models).
  */
 export const createFullDatabaseBackup = async () => {
   const db = mongoose.connection.db;
@@ -66,66 +56,11 @@ export const createFullDatabaseBackup = async () => {
     console.log(`[Backup]   ${collectionName}: ${documents.length} document(s)`);
   }
 
-  return {
-    timestamp,
-    databaseName,
-    data,
-  };
+  return { timestamp, databaseName, data };
 };
 
 /**
- * Send backup JSON as a Resend email attachment (off-site copy per 3-2-1).
- */
-export const sendBackupEmail = async (backup) => {
-  const resend = getResendClient();
-
-  if (!resend) {
-    throw new Error('Resend is not configured (RESEND_API_KEY missing or invalid)');
-  }
-
-  const backupDate = new Date(backup.timestamp);
-  const subject = `Seekon Database Backup - ${formatBackupDate(backupDate)}`;
-  const filename = `seekon_full_backup_${formatFileTimestamp(backupDate)}.json`;
-  const jsonBuffer = Buffer.from(JSON.stringify(backup, null, 2), 'utf-8');
-  const sizeMb = (jsonBuffer.length / (1024 * 1024)).toFixed(2);
-
-  const summary = buildBackupSummary(backup);
-
-  const { data, error } = await resend.emails.send({
-    from: EMAIL_FROM,
-    to: BACKUP_RECIPIENTS,
-    subject,
-    html: `
-      <h2>Seekon Full Database Backup</h2>
-      <p>Automated nightly backup of MongoDB Atlas.</p>
-      <ul>
-        <li><strong>Database:</strong> ${backup.databaseName}</li>
-        <li><strong>Timestamp (UTC):</strong> ${backup.timestamp}</li>
-        <li><strong>Collections:</strong> ${summary.collectionCount}</li>
-        <li><strong>Total documents:</strong> ${summary.totalDocuments}</li>
-        <li><strong>Attachment size:</strong> ${sizeMb} MB</li>
-      </ul>
-      <p>The full export is attached as <code>${filename}</code>.</p>
-      <p style="color:#666;font-size:12px;">Store this file securely. It may contain hashed credentials required for restore.</p>
-    `,
-    attachments: [
-      {
-        filename,
-        content: jsonBuffer,
-        contentType: 'application/json',
-      },
-    ],
-  });
-
-  if (error) {
-    throw new Error(error.message || 'Resend failed to send backup email');
-  }
-
-  return { data, filename, sizeMb };
-};
-
-/**
- * Run a single full backup cycle (export + email).
+ * Full backup cycle: MongoDB dump → Google Drive upload → retention prune.
  */
 export const runFullBackup = async () => {
   if (backupInProgress) {
@@ -133,23 +68,37 @@ export const runFullBackup = async () => {
     return;
   }
 
+  if (!isDriveConfigured()) {
+    console.warn('[Backup] Skipped: Google Drive is not configured');
+    return;
+  }
+
+  if (!getDriveClient()) {
+    console.warn('[Backup] Skipped: Drive client unavailable');
+    return;
+  }
+
   backupInProgress = true;
   const startedAt = Date.now();
 
-  console.log('[Backup] Starting full database backup...');
+  console.log('[Backup] Starting full database backup → Google Drive...');
 
   try {
     const backup = await createFullDatabaseBackup();
     const summary = buildBackupSummary(backup);
-
     console.log('[Backup] Export complete:', JSON.stringify(summary, null, 2));
 
-    const { filename, sizeMb } = await sendBackupEmail(backup);
+    const filename = `seekon_backup_${formatFileTimestamp(new Date(backup.timestamp))}.json`;
+    const upload = await uploadBackupToDrive(backup, filename);
+
+    const { deleted } = await pruneOldBackups(RETENTION_DAYS);
 
     console.log(
-      `[Backup] Success: emailed ${filename} (${sizeMb} MB) to ${BACKUP_RECIPIENTS.join(', ')}`
+      `[Backup] Success: ${upload.filename} uploaded (${upload.sizeMb} MB). Retention removed ${deleted} old file(s).`
     );
     console.log(`[Backup] Finished in ${((Date.now() - startedAt) / 1000).toFixed(1)}s`);
+
+    return { ...upload, summary };
   } catch (err) {
     console.error('[Backup] Failed:', err.message);
     if (err.stack) {
@@ -162,31 +111,53 @@ export const runFullBackup = async () => {
 };
 
 /**
- * Schedule nightly backup at 00:00 server time.
+ * Fire-and-forget backup run (never blocks the HTTP response path).
  */
-export const startBackupScheduler = () => {
-  if (scheduledTask) {
-    console.warn('[Backup] Scheduler already running');
-    return scheduledTask;
-  }
-
-  if (!process.env.MONGO_URI) {
-    console.warn('[Backup] MONGO_URI not set — backup scheduler not started');
-    return null;
-  }
-
-  // Midnight daily (server local time)
-  scheduledTask = cron.schedule('0 0 * * *', async () => {
-    console.log('[Backup] Cron triggered at midnight');
-    try {
-      await runFullBackup();
-    } catch {
-      // Errors already logged in runFullBackup
-    }
+const executeBackupAsync = () => {
+  setImmediate(() => {
+    runFullBackup().catch(() => {
+      // Errors logged inside runFullBackup
+    });
   });
+};
 
-  console.log('[Backup] Scheduler started — full backup daily at 00:00 (server time)');
-  console.log(`[Backup] Recipients: ${BACKUP_RECIPIENTS.join(', ')}`);
+/**
+ * Debounced trigger: reset 5-minute idle timer on each successful Paystack transaction.
+ * Non-blocking — only schedules a timeout.
+ */
+export const scheduleDebouncedBackup = () => {
+  if (!isDriveConfigured()) {
+    return;
+  }
 
-  return scheduledTask;
+  if (backupTimeout) {
+    clearTimeout(backupTimeout);
+  }
+
+  backupTimeout = setTimeout(() => {
+    backupTimeout = null;
+    console.log('[Backup] Debounce idle period elapsed — starting backup');
+    executeBackupAsync();
+  }, DEBOUNCE_MS);
+
+  console.log('[Backup] Debounced backup scheduled (5 min after last successful transaction)');
+};
+
+/**
+ * Run backup immediately (no debounce). Used for manual/ops triggers.
+ */
+export const runImmediateBackup = () => {
+  console.log('[Backup] Immediate backup requested');
+  executeBackupAsync();
+};
+
+export const initBackupService = () => {
+  if (isDriveConfigured()) {
+    console.log('[Backup] Google Drive backup enabled (event-driven, 5 min debounce)');
+    console.log(`[Backup] Retention: ${RETENTION_DAYS} days`);
+    // One immediate backup on startup so deploy/Railway logs confirm Drive is working
+    runImmediateBackup();
+  } else {
+    console.warn('[Backup] Google Drive backup disabled — missing GOOGLE_DRIVE_* env vars');
+  }
 };

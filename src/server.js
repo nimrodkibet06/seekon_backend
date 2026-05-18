@@ -14,7 +14,7 @@ import helmet from 'helmet';
 import rateLimit from 'express-rate-limit';
 import { validateEnv } from './config/checkEnv.js';
 import { connectDB } from './config/db.js';
-import { startBackupScheduler } from './services/backupService.js';
+import { initBackupService } from './services/backupService.js';
 import routes from './routes/index.js';
 import settingRoutes from './routes/settingRoutes.js';
 import path from 'path';
@@ -167,8 +167,8 @@ const startServer = async () => {
     // Connect to database
     await connectDB();
 
-    // Nightly full MongoDB backup → Resend email (00:00 server time)
-    startBackupScheduler();
+    // Event-driven MongoDB backup → Google Drive (debounced on Paystack success)
+    initBackupService();
     
     // Start listening
     app.listen(PORT, () => {
