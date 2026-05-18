@@ -1,5 +1,4 @@
 import { google } from 'googleapis';
-import { Readable } from 'stream';
 
 let driveClient = null;
 let authClient = null;
@@ -30,11 +29,23 @@ const parseCredentials = () => {
   }
 };
 
+/**
+ * Clean folder ID from env (quotes, whitespace, or full Drive URL pasted by mistake).
+ */
+export const getBackupFolderId = () => {
+  let id = process.env.GOOGLE_DRIVE_FOLDER_ID?.trim() || '';
+  id = id.replace(/^["']|["']$/g, '');
+
+  const urlMatch = id.match(/\/folders\/([a-zA-Z0-9_-]+)/);
+  if (urlMatch) {
+    id = urlMatch[1];
+  }
+
+  return id;
+};
+
 export const isDriveConfigured = () =>
-  Boolean(
-    process.env.GOOGLE_DRIVE_CREDENTIALS?.trim() &&
-      process.env.GOOGLE_DRIVE_FOLDER_ID?.trim()
-  );
+  Boolean(process.env.GOOGLE_DRIVE_CREDENTIALS?.trim() && getBackupFolderId());
 
 /**
  * Initialize JWT auth + Drive client (authorized once, reused).
@@ -85,41 +96,78 @@ const ensureDriveClients = async () => {
   }
 };
 
-/** @deprecated Use ensureDriveClients — kept for sync config checks in backupService */
+/**
+ * Confirm the backup folder exists and is visible to the service account.
+ * Files must be created WITH parents set to this folder so they use the owner's quota.
+ */
+const assertBackupFolderAccessible = async (drive, auth, folderId) => {
+  try {
+    const { data } = await drive.files.get({
+      auth,
+      fileId: folderId,
+      supportsAllDrives: true,
+      fields: 'id, name, mimeType, driveId',
+    });
+
+    if (data.mimeType !== 'application/vnd.google-apps.folder') {
+      throw new Error(`GOOGLE_DRIVE_FOLDER_ID (${folderId}) is not a folder`);
+    }
+
+    console.log(`[Drive] Target folder verified: "${data.name}" (${data.id})`);
+    return data;
+  } catch (err) {
+    const credentials = parseCredentials();
+    const saEmail = credentials?.client_email || 'your-service-account@project.iam.gserviceaccount.com';
+    throw new Error(
+      `Cannot access backup folder "${folderId}". Share the folder in Google Drive with ` +
+        `${saEmail} as Editor, then redeploy. Original error: ${err.message}`
+    );
+  }
+};
+
+/** @deprecated Use ensureDriveClients */
 export const getDriveClient = () => driveClient;
 
 /**
- * Upload JSON backup to the configured Drive folder.
+ * Upload JSON backup into the shared folder (uses folder owner's quota, not SA storage).
  */
 export const uploadBackupToDrive = async (backup, filename) => {
-  const folderId = process.env.GOOGLE_DRIVE_FOLDER_ID?.trim();
+  const folderId = getBackupFolderId();
 
   if (!folderId) {
     throw new Error('GOOGLE_DRIVE_FOLDER_ID is not set');
   }
 
   const { drive, auth } = await ensureDriveClients();
+  await assertBackupFolderAccessible(drive, auth, folderId);
 
   const json = JSON.stringify(backup, null, 2);
   const buffer = Buffer.from(json, 'utf-8');
   const sizeMb = (buffer.length / (1024 * 1024)).toFixed(2);
 
+  // parents is required — without it Google tries to store in the SA's empty quota
   const { data } = await drive.files.create({
     auth,
     requestBody: {
       name: filename,
       parents: [folderId],
-      mimeType: 'application/json',
     },
     media: {
       mimeType: 'application/json',
-      body: Readable.from(buffer),
+      body: buffer,
     },
-    fields: 'id, name, createdTime, webViewLink',
+    fields: 'id, name, createdTime, webViewLink, parents',
     supportsAllDrives: true,
+    uploadType: 'multipart',
   });
 
-  console.log(`[Drive] Uploaded ${data.name} (${sizeMb} MB) — id: ${data.id}`);
+  if (!data.parents?.includes(folderId)) {
+    console.warn(
+      `[Drive] Upload succeeded but parents mismatch — file may not be in folder ${folderId}`
+    );
+  }
+
+  console.log(`[Drive] Uploaded ${data.name} (${sizeMb} MB) into folder ${folderId} — id: ${data.id}`);
 
   return { fileId: data.id, filename: data.name, sizeMb, webViewLink: data.webViewLink };
 };
@@ -128,7 +176,7 @@ export const uploadBackupToDrive = async (backup, filename) => {
  * Delete backup files in the folder older than retentionDays (default 30).
  */
 export const pruneOldBackups = async (retentionDays = 30) => {
-  const folderId = process.env.GOOGLE_DRIVE_FOLDER_ID?.trim();
+  const folderId = getBackupFolderId();
 
   if (!folderId) {
     return { deleted: 0, skipped: true };
