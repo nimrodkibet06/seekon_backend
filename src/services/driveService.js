@@ -131,6 +131,10 @@ export const getDriveClient = () => driveClient;
 
 /**
  * Upload JSON backup into the shared folder (uses folder owner's quota, not SA storage).
+ *
+ * Two-step upload: multipart create() can drop `parents` and hit SA quota.
+ * 1) Create metadata-only file inside Nick's folder (parents enforced).
+ * 2) Stream JSON content into that file via files.update().
  */
 export const uploadBackupToDrive = async (backup, filename) => {
   const folderId = getBackupFolderId();
@@ -143,29 +147,45 @@ export const uploadBackupToDrive = async (backup, filename) => {
   await assertBackupFolderAccessible(drive, auth, folderId);
 
   const jsonString = JSON.stringify(backup, null, 2);
+  const dataStream = Readable.from(jsonString);
   const sizeMb = (Buffer.byteLength(jsonString, 'utf-8') / (1024 * 1024)).toFixed(2);
 
-  // parents is required — without it Google tries to store in the SA's empty quota
-  const { data } = await drive.files.create({
+  // Step 1: Place empty file in shared folder (uses folder owner quota, not SA root)
+  const { data: created } = await drive.files.create({
     auth,
     requestBody: {
       name: filename,
+      mimeType: 'application/json',
       parents: [folderId],
     },
+    fields: 'id, name, parents, webViewLink',
+    supportsAllDrives: true,
+    keepRevisionForever: false,
+  });
+
+  if (!created.parents?.includes(folderId)) {
+    await drive.files
+      .delete({ auth, fileId: created.id, supportsAllDrives: true })
+      .catch(() => {});
+    throw new Error(
+      `Drive file was not created inside folder ${folderId} (parents: ${JSON.stringify(created.parents)}). ` +
+        'Check that the folder is shared with the service account as Editor.'
+    );
+  }
+
+  console.log(`[Drive] File shell created in "${folderId}" — id: ${created.id}`);
+
+  // Step 2: Upload JSON payload into the file already living in Nick's folder
+  const { data } = await drive.files.update({
+    auth,
+    fileId: created.id,
     media: {
       mimeType: 'application/json',
-      body: Readable.from(jsonString),
+      body: dataStream,
     },
     fields: 'id, name, createdTime, webViewLink, parents',
     supportsAllDrives: true,
-    uploadType: 'multipart',
   });
-
-  if (!data.parents?.includes(folderId)) {
-    console.warn(
-      `[Drive] Upload succeeded but parents mismatch — file may not be in folder ${folderId}`
-    );
-  }
 
   console.log(`[Drive] Uploaded ${data.name} (${sizeMb} MB) into folder ${folderId} — id: ${data.id}`);
 
