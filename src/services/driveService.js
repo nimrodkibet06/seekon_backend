@@ -1,4 +1,5 @@
 import { google } from 'googleapis';
+import { Readable } from 'stream';
 
 let driveClient = null;
 let authClient = null;
@@ -137,64 +138,6 @@ const assertBackupFolderAccessible = async (drive, auth, folderId) => {
 export const getDriveClient = () => driveClient;
 
 /**
- * Resumable upload: metadata (with parents) is sent first, then bytes.
- * Avoids googleapis multipart stripping parents AND files.update() SA quota errors.
- * @see https://developers.google.com/workspace/drive/api/guides/manage-uploads#resumable
- */
-const uploadViaResumableSession = async (auth, folderId, filename, jsonString) => {
-  const { token } = await auth.getAccessToken();
-  if (!token) {
-    throw new Error('Failed to obtain Google access token');
-  }
-
-  const metadata = {
-    name: filename,
-    mimeType: 'application/json',
-    parents: [folderId],
-  };
-
-  const initResponse = await fetch(
-    'https://www.googleapis.com/upload/drive/v3/files?uploadType=resumable&supportsAllDrives=true',
-    {
-      method: 'POST',
-      headers: {
-        Authorization: `Bearer ${token}`,
-        'Content-Type': 'application/json; charset=UTF-8',
-      },
-      body: JSON.stringify(metadata),
-    }
-  );
-
-  if (!initResponse.ok) {
-    const errText = await initResponse.text();
-    throw new Error(`Resumable session failed (${initResponse.status}): ${errText}`);
-  }
-
-  const uploadUrl = initResponse.headers.get('location');
-  if (!uploadUrl) {
-    throw new Error('Resumable upload missing Location header from Google');
-  }
-
-  const contentBuffer = Buffer.from(jsonString, 'utf-8');
-
-  const uploadResponse = await fetch(uploadUrl, {
-    method: 'PUT',
-    headers: {
-      'Content-Type': 'application/json',
-      'Content-Length': String(contentBuffer.length),
-    },
-    body: contentBuffer,
-  });
-
-  if (!uploadResponse.ok) {
-    const errText = await uploadResponse.text();
-    throw new Error(`Resumable upload failed (${uploadResponse.status}): ${errText}`);
-  }
-
-  return uploadResponse.json();
-};
-
-/**
  * Upload JSON backup into the shared folder (uses folder owner's quota, not SA storage).
  */
 export const uploadBackupToDrive = async (backup, filename) => {
@@ -208,25 +151,24 @@ export const uploadBackupToDrive = async (backup, filename) => {
   await assertBackupFolderAccessible(drive, auth, folderId);
 
   const jsonString = JSON.stringify(backup, null, 2);
-  const sizeMb = (Buffer.byteLength(jsonString, 'utf-8') / (1024 * 1024)).toFixed(2);
+  const response = await drive.files.create({
+    requestBody: {
+      name: filename || `seekon_backup_${Date.now()}.json`,
+      parents: [folderId],
+    },
+    media: {
+      mimeType: 'application/json',
+      body: Readable.from(jsonString),
+    },
+    supportsAllDrives: true,
+  });
 
-  console.log(`[Drive] Starting resumable upload to folder ${folderId}...`);
-
-  const data = await uploadViaResumableSession(auth, folderId, filename, jsonString);
-
-  if (!data.parents?.includes(folderId)) {
-    console.warn(
-      `[Drive] Upload OK but parents=${JSON.stringify(data.parents)} — expected ${folderId}`
-    );
-  }
-
-  console.log(`[Drive] Uploaded ${data.name} (${sizeMb} MB) into folder ${folderId} — id: ${data.id}`);
-
+  console.log(`[Drive] File created successfully! ID: ${response.data.id}`);
   return {
-    fileId: data.id,
-    filename: data.name || filename,
-    sizeMb,
-    webViewLink: data.webViewLink,
+    fileId: response.data.id,
+    filename: response.data.name || filename,
+    sizeMb: (Buffer.byteLength(jsonString, 'utf-8') / (1024 * 1024)).toFixed(2),
+    webViewLink: response.data.webViewLink,
   };
 };
 
