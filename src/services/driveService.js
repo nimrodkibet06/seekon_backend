@@ -122,7 +122,9 @@ const assertBackupFolderAccessible = async (drive, auth, folderId) => {
       throw new Error(`GOOGLE_DRIVE_FOLDER_ID (${folderId}) is not a folder`);
     }
 
-    console.log(`[Drive] Target folder verified: "${data.name}" (${data.id})`);
+    console.log(
+      `[Drive] Target folder verified: "${data.name}" (${data.id}), driveId=${data.driveId || 'none'}`
+    );
     return data;
   } catch (err) {
     const credentials = parseCredentials();
@@ -148,7 +150,15 @@ export const uploadBackupToDrive = async (backup, filename) => {
   }
 
   const { drive, auth } = await ensureDriveClients();
-  await assertBackupFolderAccessible(drive, auth, folderId);
+  const folderMetadata = await assertBackupFolderAccessible(drive, auth, folderId);
+
+  const impersonateEmail = process.env.GOOGLE_DRIVE_IMPERSONATE_EMAIL?.trim();
+  if (!folderMetadata.driveId && !impersonateEmail) {
+    throw new Error(
+      'Service Accounts do not have personal storage quota. Use a Shared Drive folder ' +
+      'for GOOGLE_DRIVE_FOLDER_ID or set GOOGLE_DRIVE_IMPERSONATE_EMAIL to a valid user in your domain.'
+    );
+  }
 
   const jsonString = JSON.stringify(backup, null, 2);
   const response = await drive.files.create({
