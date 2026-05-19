@@ -36,7 +36,7 @@ async function smartUpload() {
   try {
     console.log('Connecting to MongoDB...');
     await mongoose.connect(mongoUri);
-    console.log('Connected successfully!');
+    console.log('Connected well and successfully!');
 
     console.log(`Starting smart upload for ${productsData.length} products...`);
 
