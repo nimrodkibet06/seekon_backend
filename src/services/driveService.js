@@ -74,6 +74,7 @@ const assertBackupFolderAccessible = async (drive, folderId) => {
     const { data } = await drive.files.get({
       fileId: folderId,
       supportsAllDrives: true,
+      supportsTeamDrives: true,
       fields: 'id, name, mimeType, driveId, webViewLink',
     });
 
