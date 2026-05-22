@@ -352,6 +352,51 @@ export const initiateSTKPush = async (req, res) => {
   }
 };
 
+// Query M-Pesa STK Push Status (Cron Fallback)
+export const querySTKPushStatus = async (checkoutRequestId) => {
+  try {
+    const consumerKey = process.env.DARAJA_CONSUMER_KEY;
+    const consumerSecret = process.env.DARAJA_CONSUMER_SECRET;
+    const shortCode = process.env.DARAJA_BUSINESS_SHORTCODE || '174379';
+    const passKey = process.env.DARAJA_PASS_KEY;
+
+    if (!consumerKey || !consumerSecret || !passKey) {
+      throw new Error('M-Pesa credentials missing in .env');
+    }
+
+    // 1. Get OAuth Access Token
+    const auth = Buffer.from(`${consumerKey}:${consumerSecret}`).toString('base64');
+    const tokenResponse = await axios.get(
+      'https://sandbox.safaricom.co.ke/oauth/v1/generate?grant_type=client_credentials',
+      { headers: { Authorization: `Basic ${auth}` } }
+    );
+    const accessToken = tokenResponse.data.access_token;
+
+    // 2. Prepare Query Payload
+    const timestamp = new Date().toISOString().replace(/[^0-9]/g, '').slice(0, 14);
+    const password = Buffer.from(`${shortCode}${passKey}${timestamp}`).toString('base64');
+
+    const queryPayload = {
+      BusinessShortCode: shortCode,
+      Password: password,
+      Timestamp: timestamp,
+      CheckoutRequestID: checkoutRequestId
+    };
+
+    // 3. Make Query Request
+    const queryResponse = await axios.post(
+      'https://sandbox.safaricom.co.ke/mpesa/stkpushquery/v1/query',
+      queryPayload,
+      { headers: { Authorization: `Bearer ${accessToken}` } }
+    );
+
+    return queryResponse.data;
+  } catch (error) {
+    console.error(`❌ M-Pesa Query Error for ${checkoutRequestId}:`, error.response?.data || error.message);
+    throw error;
+  }
+};
+
 // M-Pesa Webhook Callback
 export const handleMpesaCallback = async (req, res) => {
   try {
@@ -363,12 +408,19 @@ export const handleMpesaCallback = async (req, res) => {
     const checkoutRequestID = stkCallback.CheckoutRequestID;
     const resultCode = stkCallback.ResultCode;
 
-    // Find the associated order
-    const order = await Order.findOne({ mpesaCheckoutRequestId: checkoutRequestID });
+    // STRICT VALIDATION: Find order that matches CheckoutRequestID AND is currently PENDING
+    // This prevents double-processing or unauthorized status updates
+    const order = await Order.findOne({ 
+      mpesaCheckoutRequestId: checkoutRequestID,
+      status: 'pending'
+    });
     
     if (!order) {
-      console.warn('⚠️ Order not found for CheckoutRequestID:', checkoutRequestID);
-      return res.status(200).json({ ResultCode: 1, ResultDesc: 'Order not found' });
+      console.warn(`⚠️ STK Callback rejected: No PENDING order found for CheckoutRequestID ${checkoutRequestID}`);
+      return res.status(404).json({ 
+        success: false, 
+        message: 'No matching pending order found for this checkout ID' 
+      });
     }
 
     if (resultCode === 0) {

@@ -15,6 +15,7 @@ import rateLimit from 'express-rate-limit';
 import { validateEnv } from './config/checkEnv.js';
 import { connectDB } from './config/db.js';
 import { initBackupService } from './services/backupService.js';
+import { initMpesaSyncCron } from './scripts/stkQueryCron.js';
 import routes from './routes/index.js';
 import settingRoutes from './routes/settingRoutes.js';
 import path from 'path';
@@ -169,6 +170,9 @@ const startServer = async () => {
 
     // Event-driven MongoDB backup → Google Drive (debounced on Paystack success)
     initBackupService();
+
+    // Start M-Pesa status synchronization cron job
+    initMpesaSyncCron();
     
     // Start listening
     app.listen(PORT, () => {
