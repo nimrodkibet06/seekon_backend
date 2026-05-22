@@ -6,6 +6,7 @@ import Product from '../models/Product.js';
 import Coupon from '../models/Coupon.js';
 import crypto from 'crypto';
 import axios from 'axios';
+import { validationResult } from 'express-validator';
 import { scheduleDebouncedBackup } from '../services/backupService.js';
 
 // Helper function to decrement inventory on successful payment
@@ -257,6 +258,16 @@ export const verifyPaystackPayment = async (req, res) => {
 // M-Pesa STK Push Initialization
 export const initiateSTKPush = async (req, res) => {
   try {
+    // Check for validation errors from express-validator
+    const errors = validationResult(req);
+    if (!errors.isEmpty()) {
+      return res.status(400).json({
+        success: false,
+        errors: errors.array(),
+        message: errors.array()[0].msg // Send the first error message for simplicity
+      });
+    }
+
     const { orderId, amount, phoneNumber, email } = req.body;
 
     console.log(`📤 Received STK Push request for order ${orderId} (${amount} KES) to ${phoneNumber}`);

@@ -1,5 +1,6 @@
 import express from 'express';
 import rateLimit from 'express-rate-limit';
+import { body } from 'express-validator';
 import {
   initializePaystackPayment,
   verifyPaystackPayment,
@@ -13,15 +14,27 @@ import { authMiddleware } from '../middleware/auth.js';
 
 const router = express.Router();
 
-// Rate limiter for payment initialization - prevent spam/harassment
+// Rate limiter for payment initialization - 5 requests per 15 minutes per IP
 const paymentLimiter = rateLimit({
-  windowMs: 1 * 60 * 1000, // 1 minute
-  max: 3, // 3 requests per minute per IP
-  message: { message: "Too many payment requests. Please wait a minute and try again." }
+  windowMs: 15 * 60 * 1000, // 15 minutes
+  max: 5, 
+  message: { message: "Too many payment requests. Please wait 15 minutes and try again." },
+  standardHeaders: true,
+  legacyHeaders: false,
 });
 
+// Validation for STK Push
+const stkPushValidation = [
+  body('email').isEmail().withMessage('Please provide a valid email address'),
+  body('phoneNumber')
+    .matches(/^(254|0)(7|1)\d{8}$/)
+    .withMessage('Please provide a valid Kenyan phone number (e.g., 2547... or 07...)'),
+  body('amount').isNumeric().withMessage('Amount must be a number'),
+  body('orderId').notEmpty().withMessage('Order ID is required')
+];
+
 // M-Pesa (Daraja) payment routes
-router.post('/stk-push', paymentLimiter, initiateSTKPush);
+router.post('/stk-push', paymentLimiter, stkPushValidation, initiateSTKPush);
 router.post('/mpesa-callback', handleMpesaCallback);
 
 // Paystack payment routes
