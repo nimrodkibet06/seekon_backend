@@ -7,6 +7,16 @@ const orderSchema = new mongoose.Schema({
     ref: 'User',
     required: false
   },
+  isGuestCheckout: {
+    type: Boolean,
+    default: false
+  },
+  guestEmail: {
+    type: String
+  },
+  guestPhone: {
+    type: String
+  },
   contactEmail: {
     type: String,
     required: [true, 'Contact email is required'],

@@ -8,37 +8,6 @@ import Admin from '../models/Admin.js';
 import { sendPushNotificationToAdmins } from '../routes/notificationRoutes.js';
 import { sendOrderConfirmationEmail, sendOrderStatusUpdateEmail, sendAdminNotification } from '../utils/email.js';
 
-/**
- * Resolve an existing user by email or create a ghost guest account.
- */
-const resolveOrCreateGuestUser = async (contactEmail, shippingAddress = {}) => {
-  const normalizedEmail = contactEmail.trim().toLowerCase();
-  let user = await User.findOne({ email: normalizedEmail });
-
-  if (user) {
-    return user;
-  }
-
-  const guestName = shippingAddress.firstName
-    ? `${shippingAddress.firstName} ${shippingAddress.lastName || ''}`.trim()
-    : normalizedEmail.split('@')[0] || 'Guest';
-
-  const randomPassword = crypto.randomBytes(32).toString('hex');
-
-  user = await User.create({
-    email: normalizedEmail,
-    name: guestName,
-    isGuest: true,
-    password: randomPassword,
-    phoneNumber: shippingAddress.phone || '',
-    isVerified: false,
-    isActive: true
-  });
-
-  console.log(`👻 Ghost user created for checkout: ${normalizedEmail}`);
-  return user;
-};
-
 // Create Order
 export const createOrder = async (req, res) => {
   try {
@@ -66,11 +35,11 @@ export const createOrder = async (req, res) => {
       });
     }
 
-    const orderUser = await resolveOrCreateGuestUser(contactEmail, shippingAddress);
-    const userId = orderUser._id;
-    const userEmail = orderUser.email;
-    const userName = orderUser.name;
-
+    // GUEST CHECKOUT LOGIC: If no authenticated user, handle as guest
+    const userId = req.user?.userId || req.user?._id || req.user?.id;
+    const isGuestCheckout = !userId;
+    const userEmail = userId ? req.user.email : contactEmail;
+    
     if (!items || items.length === 0) {
       return res.status(400).json({
         success: false,
@@ -117,7 +86,10 @@ export const createOrder = async (req, res) => {
     console.log(`✅ Server-side price calculation: KSh ${calculatedTotal} (items: ${orderItems.length})`);
 
     const order = await Order.create({
-      user: userId,
+      user: userId || undefined,
+      isGuestCheckout,
+      guestEmail: isGuestCheckout ? contactEmail : undefined,
+      guestPhone: isGuestCheckout ? (shippingAddress?.phone || '') : undefined,
       contactEmail,
       userEmail,
       items: orderItems,
