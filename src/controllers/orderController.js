@@ -233,15 +233,23 @@ export const getMyOrders = async (req, res) => {
         message: 'Authentication required'
       });
     }
+
+    // Fetch user to check orderHistoryClearedAt watermark
+    const user = await User.findById(userId).select('orderHistoryClearedAt');
     
     // Only fetch paid/completed orders - exclude pending/unpaid checkouts
-    // Also exclude orders hidden by the user (soft delete)
-    const orders = await Order.find({ 
+    // Also apply watermark filter if user has cleared their history
+    const query = { 
       user: userId,
       isPaid: true,
-      status: { $nin: ['pending', 'cancelled'] },
-      hiddenByUser: { $ne: true }
-    })
+      status: { $nin: ['pending', 'cancelled'] }
+    };
+
+    if (user?.orderHistoryClearedAt) {
+      query.createdAt = { $gte: user.orderHistoryClearedAt };
+    }
+
+    const orders = await Order.find(query)
       .populate('items.product')
       .sort({ createdAt: -1 });
     
@@ -258,7 +266,7 @@ export const getMyOrders = async (req, res) => {
   }
 };
 
-// Clear User Order History (Soft Delete)
+// Clear User Order History (Watermark approach)
 export const clearUserOrderHistory = async (req, res) => {
   try {
     const userId = req.user?.userId || req.user?._id || req.user?.id;
@@ -270,15 +278,13 @@ export const clearUserOrderHistory = async (req, res) => {
       });
     }
 
-    const result = await Order.updateMany(
-      { user: userId },
-      { $set: { hiddenByUser: true } }
-    );
+    await User.findByIdAndUpdate(userId, {
+      $set: { orderHistoryClearedAt: new Date() }
+    });
 
     res.status(200).json({
       success: true,
-      message: 'Order history cleared successfully',
-      count: result.modifiedCount
+      message: 'Order history cleared successfully'
     });
   } catch (error) {
     console.error('Error clearing order history:', error);

@@ -106,6 +106,10 @@ const userSchema = new mongoose.Schema({
   pushSubscription: {
     type: Object,
     default: null
+  },
+  orderHistoryClearedAt: {
+    type: Date,
+    default: null
   }
 }, {
   timestamps: true
