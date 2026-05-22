@@ -1,3 +1,4 @@
+import crypto from 'crypto';
 import Order from '../models/Order.js';
 import Product from '../models/Product.js';
 import SystemLog from '../models/SystemLog.js';
@@ -7,45 +8,68 @@ import Admin from '../models/Admin.js';
 import { sendPushNotificationToAdmins } from '../routes/notificationRoutes.js';
 import { sendOrderConfirmationEmail, sendOrderStatusUpdateEmail, sendAdminNotification } from '../utils/email.js';
 
+/**
+ * Resolve an existing user by email or create a ghost guest account.
+ */
+const resolveOrCreateGuestUser = async (contactEmail, shippingAddress = {}) => {
+  const normalizedEmail = contactEmail.trim().toLowerCase();
+  let user = await User.findOne({ email: normalizedEmail });
+
+  if (user) {
+    return user;
+  }
+
+  const guestName = shippingAddress.firstName
+    ? `${shippingAddress.firstName} ${shippingAddress.lastName || ''}`.trim()
+    : normalizedEmail.split('@')[0] || 'Guest';
+
+  const randomPassword = crypto.randomBytes(32).toString('hex');
+
+  user = await User.create({
+    email: normalizedEmail,
+    name: guestName,
+    isGuest: true,
+    password: randomPassword,
+    phoneNumber: shippingAddress.phone || '',
+    isVerified: false,
+    isActive: true
+  });
+
+  console.log(`👻 Ghost user created for checkout: ${normalizedEmail}`);
+  return user;
+};
+
 // Create Order
 export const createOrder = async (req, res) => {
   try {
-    // Log the incoming payload to see what frontend actually sent
     console.log("🔥 INCOMING ORDER REQUEST BODY:", JSON.stringify(req.body, null, 2));
     console.log("👤 AUTH USER:", JSON.stringify(req.user, null, 2));
-    
+
     const {
       items,
       paymentMethod,
       shippingAddress,
       deliveryDate,
-      convenientTime
+      convenientTime,
+      contactEmail: bodyContactEmail,
+      email: bodyEmail
     } = req.body;
 
-    // Get user from auth middleware - MUST exist since route is protected
-    const userId = req.user?.userId || req.user?._id || req.user?.id;
-    
-    // CRITICAL: Do NOT allow guest checkout if authenticated
-    if (!userId) {
-      return res.status(401).json({
+    const contactEmail = (bodyContactEmail || bodyEmail || req.user?.email || shippingAddress?.email || '')
+      .trim()
+      .toLowerCase();
+
+    if (!contactEmail) {
+      return res.status(400).json({
         success: false,
-        message: 'Authentication required. Please log in to place an order.'
+        message: 'contactEmail is required to place an order'
       });
     }
-    
-    // Get user email and name from database since JWT doesn't include email/name
-    let userEmail = req.user?.email;
-    let userName = req.user?.name;
-    if (!userEmail || !userName) {
-      try {
-        const User = (await import('../models/User.js')).default;
-        const user = await User.findById(userId).select('email name');
-        userEmail = user?.email;
-        userName = user?.name;
-      } catch (e) {
-        console.error('Error fetching user data:', e);
-      }
-    }
+
+    const orderUser = await resolveOrCreateGuestUser(contactEmail, shippingAddress);
+    const userId = orderUser._id;
+    const userEmail = orderUser.email;
+    const userName = orderUser.name;
 
     if (!items || items.length === 0) {
       return res.status(400).json({
@@ -93,8 +117,9 @@ export const createOrder = async (req, res) => {
     console.log(`✅ Server-side price calculation: KSh ${calculatedTotal} (items: ${orderItems.length})`);
 
     const order = await Order.create({
-      user: userId, // Can be null for guest checkout
-      userEmail: userEmail,
+      user: userId,
+      contactEmail,
+      userEmail,
       items: orderItems,
       totalAmount: calculatedTotal,
       paymentMethod: normalizedPaymentMethod,
@@ -179,6 +204,7 @@ export const getAllOrders = async (req, res) => {
     
     if (search) {
       query.$or = [
+        { contactEmail: { $regex: search, $options: 'i' } },
         { userEmail: { $regex: search, $options: 'i' } },
         { paymentReference: { $regex: search, $options: 'i' } }
       ];
@@ -314,7 +340,7 @@ export const updateOrderStatus = async (req, res) => {
     });
 
     // Send status update email to customer (async - non-blocking)
-    const customerEmail = order.userEmail || order.user?.email;
+    const customerEmail = order.contactEmail || order.userEmail || order.user?.email;
     if (customerEmail && newStatus) {
       sendOrderStatusUpdateEmail(customerEmail, order, newStatus).catch(err =>
         console.error('⚠️ Error sending order status update email:', err.message)

@@ -254,6 +254,190 @@ export const verifyPaystackPayment = async (req, res) => {
   }
 };
 
+// M-Pesa STK Push Initialization
+export const initiateSTKPush = async (req, res) => {
+  try {
+    const { orderId, amount, phoneNumber, email } = req.body;
+
+    console.log(`📤 Received STK Push request for order ${orderId} (${amount} KES) to ${phoneNumber}`);
+
+    if (!orderId || !amount || !phoneNumber) {
+      return res.status(400).json({
+        success: false,
+        message: 'Order ID, amount, and phone number are required'
+      });
+    }
+
+    // Safaricom Sandbox Credentials (Fallback to common defaults if not in .env)
+    const consumerKey = process.env.DARAJA_CONSUMER_KEY || 'your_sandbox_key';
+    const consumerSecret = process.env.DARAJA_CONSUMER_SECRET || 'your_sandbox_secret';
+    const shortCode = process.env.DARAJA_BUSINESS_SHORTCODE || '174379';
+    const passKey = process.env.DARAJA_PASS_KEY || 'bfb279f9aa9bdbcf158e97dd71a467cd2e0c893059b10f78e6b72ada1ed2c919';
+    const callbackUrl = process.env.CALLBACK_URL || process.env.MPESA_CALLBACK_URL;
+
+    if (!callbackUrl) {
+      console.warn('⚠️ CALLBACK_URL not set in .env. Safaricom will not be able to send payment results!');
+    }
+
+    // 1. Get OAuth Access Token
+    const auth = Buffer.from(`${consumerKey}:${consumerSecret}`).toString('base64');
+    const tokenResponse = await axios.get(
+      'https://sandbox.safaricom.co.ke/oauth/v1/generate?grant_type=client_credentials',
+      { headers: { Authorization: `Basic ${auth}` } }
+    );
+    const accessToken = tokenResponse.data.access_token;
+
+    // 2. Prepare STK Push Payload
+    const timestamp = new Date().toISOString().replace(/[^0-9]/g, '').slice(0, 14);
+    const password = Buffer.from(`${shortCode}${passKey}${timestamp}`).toString('base64');
+    
+    // Normalize phone number (must be 2547XXXXXXXX)
+    let formattedPhone = phoneNumber.replace(/[^0-9]/g, '');
+    if (formattedPhone.startsWith('0')) formattedPhone = '254' + formattedPhone.slice(1);
+    if (formattedPhone.startsWith('7') || formattedPhone.startsWith('1')) formattedPhone = '254' + formattedPhone;
+    if (formattedPhone.length < 12) formattedPhone = '254' + formattedPhone;
+
+    const stkPayload = {
+      BusinessShortCode: shortCode,
+      Password: password,
+      Timestamp: timestamp,
+      TransactionType: 'CustomerPayBillOnline',
+      Amount: 1, // Capped for Sandbox testing
+      PartyA: formattedPhone,
+      PartyB: shortCode,
+      PhoneNumber: formattedPhone,
+      CallBackURL: callbackUrl,
+      AccountReference: `Order-${orderId.slice(-6)}`,
+      TransactionDesc: 'Payment for Seekon Apparel'
+    };
+
+    // 3. Initiate STK Push
+    const stkResponse = await axios.post(
+      'https://sandbox.safaricom.co.ke/mpesa/stkpush/v1/processrequest',
+      stkPayload,
+      { headers: { Authorization: `Bearer ${accessToken}` } }
+    );
+
+    // 4. Update Order with CheckoutRequestID
+    await Order.findByIdAndUpdate(orderId, {
+      mpesaCheckoutRequestId: stkResponse.data.CheckoutRequestID,
+      paymentMethod: 'M-Pesa'
+    });
+
+    console.log(`✅ STK Push initiated successfully: ${stkResponse.data.CheckoutRequestID}`);
+
+    res.status(200).json({
+      success: true,
+      message: 'STK Push initiated successfully',
+      data: stkResponse.data
+    });
+
+  } catch (error) {
+    console.error('❌ M-Pesa STK Push Error:', error.response?.data || error.message);
+    res.status(500).json({
+      success: false,
+      message: error.response?.data?.errorMessage || 'Failed to initiate M-Pesa payment'
+    });
+  }
+};
+
+// M-Pesa Webhook Callback
+export const handleMpesaCallback = async (req, res) => {
+  try {
+    const { Body } = req.body;
+    const { stkCallback } = Body;
+
+    console.log('🔔 M-Pesa Callback Received:', JSON.stringify(Body, null, 2));
+
+    const checkoutRequestID = stkCallback.CheckoutRequestID;
+    const resultCode = stkCallback.ResultCode;
+
+    // Find the associated order
+    const order = await Order.findOne({ mpesaCheckoutRequestId: checkoutRequestID });
+    
+    if (!order) {
+      console.warn('⚠️ Order not found for CheckoutRequestID:', checkoutRequestID);
+      return res.status(200).json({ ResultCode: 1, ResultDesc: 'Order not found' });
+    }
+
+    if (resultCode === 0) {
+      // Success!
+      const metadata = stkCallback.CallbackMetadata.Item;
+      const receipt = metadata.find(i => i.Name === 'MpesaReceiptNumber')?.Value;
+      const amount = metadata.find(i => i.Name === 'Amount')?.Value;
+      const phone = metadata.find(i => i.Name === 'PhoneNumber')?.Value || '';
+
+      // Update Order
+      order.isPaid = true;
+      order.paidAt = new Date();
+      order.paymentReference = receipt;
+      order.status = 'processing';
+      order.paymentResult = {
+        id: receipt,
+        status: 'Completed',
+        amountPaid: amount
+      };
+      await order.save();
+
+      // Create Transaction
+      await Transaction.create({
+        userEmail: order.userEmail || order.contactEmail || 'customer@seekon.com',
+        phoneNumber: phone.toString(),
+        method: 'mpesa',
+        amount: amount,
+        status: 'completed',
+        reference: receipt,
+        callbackData: Body
+      });
+
+      // Inventory & Notifications
+      await decrementInventory(order.items);
+      
+      try {
+        await Notification.create({
+          type: 'NEW_ORDER',
+          message: `Payment received! Order paid via M-Pesa: KSh ${amount}`,
+          orderId: order._id
+        });
+      } catch (err) { console.error('Notification error:', err); }
+
+      // Clear cart
+      if (order.user) {
+        await Cart.findOneAndUpdate(
+          { userId: order.user },
+          { items: [], totalItems: 0, totalPrice: 0 }
+        );
+      }
+
+      // Backup DB
+      scheduleDebouncedBackup();
+
+      console.log(`✅ Order ${order._id} paid successfully via M-Pesa (${receipt})`);
+    } else {
+      // Failure
+      order.status = 'failed';
+      await order.save();
+      
+      await Transaction.create({
+        userEmail: order.userEmail || order.contactEmail || 'customer@seekon.com',
+        method: 'mpesa',
+        amount: order.totalAmount,
+        status: 'failed',
+        reference: checkoutRequestID,
+        callbackData: Body
+      });
+      
+      console.log(`❌ M-Pesa payment failed for order ${order._id}: ${stkCallback.ResultDesc}`);
+    }
+
+    res.status(200).json({ ResultCode: 0, ResultDesc: 'Success' });
+
+  } catch (error) {
+    console.error('🔥 M-Pesa Callback Error:', error);
+    res.status(500).json({ ResultCode: 1, ResultDesc: 'Internal server error' });
+  }
+};
+
 // Flutterwave Payment Initialization (keep existing code)
 const initFlutterwave = () => {
   const Flutterwave = require('flutterwave-node-v3').default;

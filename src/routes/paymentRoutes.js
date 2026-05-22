@@ -5,7 +5,9 @@ import {
   verifyPaystackPayment,
   initiateFlutterwavePayment,
   flutterwaveCallback,
-  getUserTransactions
+  getUserTransactions,
+  initiateSTKPush,
+  handleMpesaCallback
 } from '../controllers/paymentController.js';
 import { authMiddleware } from '../middleware/auth.js';
 
@@ -17,6 +19,10 @@ const paymentLimiter = rateLimit({
   max: 3, // 3 requests per minute per IP
   message: { message: "Too many payment requests. Please wait a minute and try again." }
 });
+
+// M-Pesa (Daraja) payment routes
+router.post('/stk-push', paymentLimiter, initiateSTKPush);
+router.post('/mpesa-callback', handleMpesaCallback);
 
 // Paystack payment routes
 router.post('/paystack/initialize', authMiddleware, paymentLimiter, initializePaystackPayment);

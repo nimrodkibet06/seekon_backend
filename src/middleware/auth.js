@@ -71,6 +71,33 @@ export const authMiddleware = (req, res, next) => {
 };
 
 /**
+ * Optional auth — attaches req.user when a valid token is present; does not block guests.
+ */
+export const optionalAuthMiddleware = (req, res, next) => {
+  try {
+    const authHeader = req.headers.authorization;
+
+    if (!authHeader || !authHeader.startsWith('Bearer ')) {
+      return next();
+    }
+
+    if (!process.env.JWT_SECRET) {
+      return next();
+    }
+
+    const token = authHeader.split(' ')[1];
+    const decoded = jwt.verify(token, process.env.JWT_SECRET);
+    req.user = {
+      ...decoded,
+      _id: decoded.userId || decoded._id
+    };
+    next();
+  } catch {
+    next();
+  }
+};
+
+/**
  * Middleware to check if user is admin
  */
 export const adminMiddleware = (req, res, next) => {

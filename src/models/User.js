@@ -16,8 +16,15 @@ const userSchema = new mongoose.Schema({
   },
   password: {
     type: String,
-    required: [false, 'Password is required'],
-    minlength: [8, 'Password must be at least 8 characters']
+    required: function () {
+      return !this.isGuest;
+    },
+    minlength: [8, 'Password must be at least 8 characters'],
+    default: null
+  },
+  isGuest: {
+    type: Boolean,
+    default: false
   },
   authProvider: {
     type: String,
@@ -104,10 +111,10 @@ const userSchema = new mongoose.Schema({
   timestamps: true
 });
 
-// Hash password before saving
+// Hash password before saving (skip guests / accounts without a password)
 userSchema.pre('save', async function(next) {
-  if (!this.isModified('password')) return next();
-  
+  if (!this.isModified('password') || !this.password) return next();
+
   const salt = await bcrypt.genSalt(10);
   this.password = await bcrypt.hash(this.password, salt);
   next();
@@ -115,6 +122,7 @@ userSchema.pre('save', async function(next) {
 
 // Method to compare password
 userSchema.methods.comparePassword = async function(candidatePassword) {
+  if (!this.password) return false;
   return await bcrypt.compare(candidatePassword, this.password);
 };
 

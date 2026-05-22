@@ -1,10 +1,17 @@
 import mongoose from 'mongoose';
 
 const orderSchema = new mongoose.Schema({
+  // userId — optional at checkout time; resolved via ghost-user flow when possible
   user: {
     type: mongoose.Schema.Types.ObjectId,
     ref: 'User',
-    required: false // Optional for guest checkout
+    required: false
+  },
+  contactEmail: {
+    type: String,
+    required: [true, 'Contact email is required'],
+    lowercase: true,
+    trim: true
   },
   userEmail: {
     type: String,

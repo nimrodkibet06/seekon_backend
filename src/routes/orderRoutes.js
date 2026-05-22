@@ -1,11 +1,11 @@
 import express from 'express';
 import { getMyOrders, getOrder, createOrder, updateOrderStatus, deleteOrder } from '../controllers/orderController.js';
-import { authMiddleware, adminMiddleware } from '../middleware/auth.js';
+import { authMiddleware, optionalAuthMiddleware, adminMiddleware } from '../middleware/auth.js';
 
 const router = express.Router();
 
-// Create new order (requires authentication)
-router.post('/', authMiddleware, createOrder);
+// Create new order (guest checkout supported via contactEmail + ghost user)
+router.post('/', optionalAuthMiddleware, createOrder);
 
 // Get current user's orders (requires authentication)
 router.get('/my-orders', authMiddleware, getMyOrders);
