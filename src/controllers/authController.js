@@ -9,9 +9,9 @@ import { OAuth2Client } from 'google-auth-library';
 /**
  * Generate JWT Token
  */
-const generateToken = (userId, role = 'user') => {
+const generateToken = (userId, role = 'user', expiresIn = '2h') => {
   return jwt.sign({ userId, role }, process.env.JWT_SECRET, {
-    expiresIn: '7d'
+    expiresIn
   });
 };
 
@@ -49,6 +49,9 @@ export const googleAuth = async (req, res) => {
         message: 'Registration from temporary/disposable email addresses is not allowed. Please use a permanent email address.'
       });
     }
+
+    const { rememberMe } = req.body;
+    const expiresIn = rememberMe ? '7d' : '2h';
 
     // Check if user exists
     let user = await User.findOne({ email });
@@ -503,7 +506,7 @@ export const login = async (req, res) => {
     }
 
     // Generate token with role
-    const token = generateToken(user._id, user.role);
+    const token = generateToken(user._id, user.role, expiresIn);
 
     res.status(200).json({
       success: true,
@@ -537,7 +540,7 @@ export const login = async (req, res) => {
  */
 export const unifiedAuth = async (req, res) => {
   try {
-    const { email, password, name } = req.body;
+    const { email, password, name, rememberMe } = req.body;
 
     // SECURITY: Block disposable emails
     if (isDisposable(email)) {
@@ -608,7 +611,7 @@ export const unifiedAuth = async (req, res) => {
     }
 
     // Generate token (same for both cases) with role
-    const token = generateToken(user._id, user.role);
+    const token = generateToken(user._id, user.role, rememberMe ? '7d' : '2h');
 
     res.status(200).json({
       success: true,
