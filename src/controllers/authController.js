@@ -1,5 +1,6 @@
 import jwt from 'jsonwebtoken';
 import User from '../models/User.js';
+import Order from '../models/Order.js';
 import { sendVerificationEmail, sendPasswordResetEmail, sendOTPEmail, sendWelcomeEmail } from '../utils/email.js';
 import crypto from 'crypto';
 import { OAuth2Client } from 'google-auth-library';
@@ -76,6 +77,19 @@ export const googleAuth = async (req, res) => {
         isVerified: true, // Google emails are already verified
         isActive: true // Ensure new users are active
       });
+
+      // ORDER CLAIMING: Link previous guest orders to this new account
+      try {
+        const result = await Order.updateMany(
+          { guestEmail: email.toLowerCase(), isGuestCheckout: true },
+          { user: user._id, isGuestCheckout: false }
+        );
+        if (result.modifiedCount > 0) {
+          console.log(`🔗 Claimed ${result.modifiedCount} guest orders for new Google user: ${email}`);
+        }
+      } catch (orderError) {
+        console.error('⚠️ Error claiming guest orders for Google user:', orderError.message);
+      }
     }
 
     // Generate token
@@ -299,6 +313,19 @@ export const register = async (req, res) => {
       password,
       isVerified: true
     });
+
+    // ORDER CLAIMING: Link previous guest orders to this new account
+    try {
+      const result = await Order.updateMany(
+        { guestEmail: email.toLowerCase(), isGuestCheckout: true },
+        { user: user._id, isGuestCheckout: false }
+      );
+      if (result.modifiedCount > 0) {
+        console.log(`🔗 Claimed ${result.modifiedCount} guest orders for new user: ${email}`);
+      }
+    } catch (orderError) {
+      console.error('⚠️ Error claiming guest orders:', orderError.message);
+    }
 
     // Send welcome email (async - don't wait for it to complete)
     sendWelcomeEmail(name, email).catch(err => {
@@ -540,6 +567,19 @@ export const unifiedAuth = async (req, res) => {
         password
       });
       isNewUser = true;
+
+      // ORDER CLAIMING: Link previous guest orders to this new account
+      try {
+        const result = await Order.updateMany(
+          { guestEmail: email.toLowerCase(), isGuestCheckout: true },
+          { user: user._id, isGuestCheckout: false }
+        );
+        if (result.modifiedCount > 0) {
+          console.log(`🔗 Claimed ${result.modifiedCount} guest orders for newly registered user (unified): ${email}`);
+        }
+      } catch (orderError) {
+        console.error('⚠️ Error claiming guest orders (unified):', orderError.message);
+      }
     }
 
     // Generate token (same for both cases) with role
