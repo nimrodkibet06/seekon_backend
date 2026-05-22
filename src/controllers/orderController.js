@@ -238,15 +238,21 @@ export const getMyOrders = async (req, res) => {
     const user = await User.findById(userId).select('orderHistoryClearedAt');
     
     // Only fetch paid/completed orders - exclude pending/unpaid checkouts
-    // Also apply watermark filter if user has cleared their history
+    // Also apply watermark filter if user has cleared their history, 
+    // but ALWAYS show active orders (not delivered, cancelled, or failed)
     const query = { 
       user: userId,
-      isPaid: true,
-      status: { $nin: ['pending', 'cancelled'] }
+      isPaid: true
     };
 
     if (user?.orderHistoryClearedAt) {
-      query.createdAt = { $gte: user.orderHistoryClearedAt };
+      query.$or = [
+        { createdAt: { $gte: user.orderHistoryClearedAt } },
+        { status: { $nin: ['delivered', 'cancelled', 'failed'] } }
+      ];
+    } else {
+      // If history was never cleared, still filter out common noise
+      query.status = { $nin: ['pending', 'cancelled'] };
     }
 
     const orders = await Order.find(query)
