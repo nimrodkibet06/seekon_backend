@@ -235,10 +235,12 @@ export const getMyOrders = async (req, res) => {
     }
     
     // Only fetch paid/completed orders - exclude pending/unpaid checkouts
+    // Also exclude orders hidden by the user (soft delete)
     const orders = await Order.find({ 
       user: userId,
       isPaid: true,
-      status: { $nin: ['pending', 'cancelled'] }
+      status: { $nin: ['pending', 'cancelled'] },
+      hiddenByUser: { $ne: true }
     })
       .populate('items.product')
       .sort({ createdAt: -1 });
@@ -252,6 +254,37 @@ export const getMyOrders = async (req, res) => {
     res.status(500).json({
       success: false,
       message: 'Failed to fetch order history'
+    });
+  }
+};
+
+// Clear User Order History (Soft Delete)
+export const clearUserOrderHistory = async (req, res) => {
+  try {
+    const userId = req.user?.userId || req.user?._id || req.user?.id;
+    
+    if (!userId) {
+      return res.status(401).json({
+        success: false,
+        message: 'Authentication required'
+      });
+    }
+
+    const result = await Order.updateMany(
+      { user: userId },
+      { $set: { hiddenByUser: true } }
+    );
+
+    res.status(200).json({
+      success: true,
+      message: 'Order history cleared successfully',
+      count: result.modifiedCount
+    });
+  } catch (error) {
+    console.error('Error clearing order history:', error);
+    res.status(500).json({
+      success: false,
+      message: 'Failed to clear order history'
     });
   }
 };
