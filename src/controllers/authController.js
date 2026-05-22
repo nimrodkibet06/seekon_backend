@@ -1,6 +1,7 @@
 import jwt from 'jsonwebtoken';
 import User from '../models/User.js';
 import Order from '../models/Order.js';
+import isDisposable from 'disposable-email-blocklist';
 import { sendVerificationEmail, sendPasswordResetEmail, sendOTPEmail, sendWelcomeEmail } from '../utils/email.js';
 import crypto from 'crypto';
 import { OAuth2Client } from 'google-auth-library';
@@ -40,6 +41,14 @@ export const googleAuth = async (req, res) => {
 
     const payload = ticket.getPayload();
     const { email, name, picture } = payload;
+
+    // SECURITY: Block disposable emails
+    if (isDisposable(email)) {
+      return res.status(400).json({
+        success: false,
+        message: 'Registration from temporary/disposable email addresses is not allowed. Please use a permanent email address.'
+      });
+    }
 
     // Check if user exists
     let user = await User.findOne({ email });
@@ -131,6 +140,14 @@ export const sendVerificationCode = async (req, res) => {
       return res.status(400).json({
         success: false,
         message: 'Email is required'
+      });
+    }
+
+    // SECURITY: Block disposable emails
+    if (isDisposable(email)) {
+      return res.status(400).json({
+        success: false,
+        message: 'Registration from temporary/disposable email addresses is not allowed. Please use a permanent email address.'
       });
     }
 
@@ -521,6 +538,14 @@ export const login = async (req, res) => {
 export const unifiedAuth = async (req, res) => {
   try {
     const { email, password, name } = req.body;
+
+    // SECURITY: Block disposable emails
+    if (isDisposable(email)) {
+      return res.status(400).json({
+        success: false,
+        message: 'Registration from temporary/disposable email addresses is not allowed. Please use a permanent email address.'
+      });
+    }
 
     // Validate input
     if (!email || !password) {

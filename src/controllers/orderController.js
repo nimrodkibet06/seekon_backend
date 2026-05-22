@@ -5,6 +5,7 @@ import SystemLog from '../models/SystemLog.js';
 import Notification from '../models/Notification.js';
 import User from '../models/User.js';
 import Admin from '../models/Admin.js';
+import isDisposable from 'disposable-email-blocklist';
 import { sendPushNotificationToAdmins } from '../routes/notificationRoutes.js';
 import { sendOrderConfirmationEmail, sendOrderStatusUpdateEmail, sendAdminNotification } from '../utils/email.js';
 
@@ -32,6 +33,14 @@ export const createOrder = async (req, res) => {
       return res.status(400).json({
         success: false,
         message: 'contactEmail is required to place an order'
+      });
+    }
+
+    // SECURITY: Block disposable emails
+    if (isDisposable(contactEmail)) {
+      return res.status(400).json({
+        success: false,
+        message: 'Orders from temporary/disposable email addresses are not allowed. Please use a permanent email address.'
       });
     }
 
