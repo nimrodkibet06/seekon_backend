@@ -1,7 +1,16 @@
 import jwt from 'jsonwebtoken';
 import User from '../models/User.js';
 import Order from '../models/Order.js';
-import isDisposable from 'disposable-email-blocklist';
+import disposableDomains from 'disposable-email-blocklist';
+
+/**
+ * Helper to check if email is disposable
+ */
+const isEmailDisposable = (email) => {
+  if (!email) return false;
+  const domain = email.split('@')[1];
+  return disposableDomains.includes(domain);
+};
 import { sendVerificationEmail, sendPasswordResetEmail, sendOTPEmail, sendWelcomeEmail } from '../utils/email.js';
 import crypto from 'crypto';
 import { OAuth2Client } from 'google-auth-library';
@@ -43,7 +52,7 @@ export const googleAuth = async (req, res) => {
     const { email, name, picture } = payload;
 
     // SECURITY: Block disposable emails
-    if (isDisposable(email)) {
+    if (isEmailDisposable(email)) {
       return res.status(400).json({
         success: false,
         message: 'Registration from temporary/disposable email addresses is not allowed. Please use a permanent email address.'
@@ -147,7 +156,7 @@ export const sendVerificationCode = async (req, res) => {
     }
 
     // SECURITY: Block disposable emails
-    if (isDisposable(email)) {
+    if (isEmailDisposable(email)) {
       return res.status(400).json({
         success: false,
         message: 'Registration from temporary/disposable email addresses is not allowed. Please use a permanent email address.'
@@ -543,7 +552,7 @@ export const unifiedAuth = async (req, res) => {
     const { email, password, name, rememberMe } = req.body;
 
     // SECURITY: Block disposable emails
-    if (isDisposable(email)) {
+    if (isEmailDisposable(email)) {
       return res.status(400).json({
         success: false,
         message: 'Registration from temporary/disposable email addresses is not allowed. Please use a permanent email address.'
