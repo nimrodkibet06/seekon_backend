@@ -49,7 +49,7 @@ export const googleAuth = async (req, res) => {
     });
 
     const payload = ticket.getPayload();
-    const { email, name, picture } = payload;
+    const { email, name, picture, sub: googleId } = payload;
 
     // SECURITY: Block disposable emails
     if (isEmailDisposable(email)) {
@@ -62,10 +62,25 @@ export const googleAuth = async (req, res) => {
     const { rememberMe } = req.body;
     const expiresIn = rememberMe ? '7d' : '2h';
 
-    // Check if user exists
-    let user = await User.findOne({ email });
+    // Check if user exists by googleId first, then by email
+    let user = await User.findOne({ 
+      $or: [
+        { googleId },
+        { email: email.toLowerCase() }
+      ]
+    });
 
     if (user) {
+      // If user found by email but has no googleId, link it if it's a local account?
+      // Actually, the requirement said: "Ensure the googleAuth controller in authController.js correctly maps the Google ID"
+      
+      // Update googleId if missing
+      if (!user.googleId) {
+        user.googleId = googleId;
+        user.authProvider = 'google';
+        await user.save();
+      }
+
       // Check if user is a Google user
       if (user.authProvider !== 'google') {
         return res.status(400).json({
@@ -92,7 +107,8 @@ export const googleAuth = async (req, res) => {
       // Create new Google user
       user = await User.create({
         name,
-        email,
+        email: email.toLowerCase(),
+        googleId,
         authProvider: 'google',
         profilePhoto: picture || '',
         isVerified: true, // Google emails are already verified
@@ -114,7 +130,7 @@ export const googleAuth = async (req, res) => {
     }
 
     // Generate token
-    const token = generateToken(user._id, user.role);
+    const token = generateToken(user._id, user.role, expiresIn);
 
     res.status(200).json({
       success: true,
@@ -513,6 +529,9 @@ export const login = async (req, res) => {
         message: 'This account has been deactivated. Please contact support.'
       });
     }
+
+    const { rememberMe } = req.body;
+    const expiresIn = rememberMe ? '7d' : '2h';
 
     // Generate token with role
     const token = generateToken(user._id, user.role, expiresIn);

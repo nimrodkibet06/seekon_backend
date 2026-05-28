@@ -17,7 +17,7 @@ const userSchema = new mongoose.Schema({
   password: {
     type: String,
     required: function () {
-      return !this.isGuest;
+      return !this.isGuest && this.authProvider === 'local';
     },
     minlength: [8, 'Password must be at least 8 characters'],
     default: null
@@ -25,6 +25,11 @@ const userSchema = new mongoose.Schema({
   isGuest: {
     type: Boolean,
     default: false
+  },
+  googleId: {
+    type: String,
+    unique: true,
+    sparse: true
   },
   authProvider: {
     type: String,
