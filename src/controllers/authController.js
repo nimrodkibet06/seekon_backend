@@ -60,7 +60,7 @@ export const googleAuth = async (req, res) => {
     }
 
     const { rememberMe } = req.body;
-    const expiresIn = rememberMe ? '7d' : '2h';
+    const expiresIn = rememberMe ? '7d' : '1d';
 
     // Check if user exists by googleId first, then by email
     let user = await User.findOne({ 
@@ -531,7 +531,7 @@ export const login = async (req, res) => {
     }
 
     const { rememberMe } = req.body;
-    const expiresIn = rememberMe ? '7d' : '2h';
+    const expiresIn = rememberMe ? '7d' : '1d';
 
     // Generate token with role
     const token = generateToken(user._id, user.role, expiresIn);
@@ -639,7 +639,7 @@ export const unifiedAuth = async (req, res) => {
     }
 
     // Generate token (same for both cases) with role
-    const token = generateToken(user._id, user.role, rememberMe ? '7d' : '2h');
+    const token = generateToken(user._id, user.role, rememberMe ? '7d' : '1d');
 
     res.status(200).json({
       success: true,
