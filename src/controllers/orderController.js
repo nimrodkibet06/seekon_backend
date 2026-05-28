@@ -243,26 +243,16 @@ export const getMyOrders = async (req, res) => {
       });
     }
 
-    // Fetch user to check orderHistoryClearedAt watermark
-    const user = await User.findById(userId).select('orderHistoryClearedAt');
-    
+    // Return orders where user matches and hiddenByUser is false (or not set)
     // Only fetch paid/completed orders - exclude pending/unpaid checkouts
-    // Also apply watermark filter if user has cleared their history, 
-    // but ALWAYS show active orders (not delivered, cancelled, or failed)
     const query = { 
       user: userId,
-      isPaid: true
+      isPaid: true,
+      hiddenByUser: { $ne: true }
     };
 
-    if (user?.orderHistoryClearedAt) {
-      query.$or = [
-        { createdAt: { $gte: user.orderHistoryClearedAt } },
-        { status: { $nin: ['delivered', 'cancelled', 'failed'] } }
-      ];
-    } else {
-      // If history was never cleared, still filter out common noise
-      query.status = { $nin: ['pending', 'cancelled'] };
-    }
+    // still filter out common noise
+    query.status = { $nin: ['pending', 'cancelled'] };
 
     const orders = await Order.find(query)
       .populate('items.product')
@@ -281,7 +271,7 @@ export const getMyOrders = async (req, res) => {
   }
 };
 
-// Clear User Order History (Watermark approach)
+// Clear User Order History (Bulk Update approach)
 export const clearUserOrderHistory = async (req, res) => {
   try {
     const userId = req.user?.userId || req.user?._id || req.user?.id;
@@ -293,9 +283,14 @@ export const clearUserOrderHistory = async (req, res) => {
       });
     }
 
-    await User.findByIdAndUpdate(userId, {
-      $set: { orderHistoryClearedAt: new Date() }
-    });
+    // Mark existing completed/finalized orders as hidden
+    await Order.updateMany(
+      { 
+        user: userId, 
+        status: { $in: ['delivered', 'completed', 'cancelled', 'failed'] } 
+      }, 
+      { $set: { hiddenByUser: true } }
+    );
 
     res.status(200).json({
       success: true,

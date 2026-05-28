@@ -101,6 +101,10 @@ const orderSchema = new mongoose.Schema({
   },
   deliveryDetails: {
     type: String
+  },
+  hiddenByUser: {
+    type: Boolean,
+    default: false
   }
 }, {
   timestamps: true

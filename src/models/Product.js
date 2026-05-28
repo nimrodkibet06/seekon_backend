@@ -78,7 +78,7 @@ const productSchema = new mongoose.Schema({
     },
     userName: {
       type: String,
-      default: 'Anonymous'
+      default: 'Customer'
     },
     rating: {
       type: Number,
