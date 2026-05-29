@@ -7,13 +7,43 @@ import User from '../models/User.js';
 import Admin from '../models/Admin.js';
 import disposableDomains from 'disposable-email-blocklist';
 
+import axios from 'axios';
+
 /**
- * Helper to check if email is disposable
+ * Helper to check if email is disposable (Two-tiered defense)
  */
-const isEmailDisposable = (email) => {
+const isEmailDisposable = async (email) => {
   if (!email) return false;
+  
+  // TIER 1: Local Static Check (Fast, No Cost)
   const domain = email.split('@')[1].toLowerCase();
-  return disposableDomains.includes(domain);
+  if (disposableDomains.includes(domain)) {
+    return true;
+  }
+
+  // TIER 2: Live API Check (Abstract API)
+  // Strict Fail-Safe: If API fails or key is missing, return false to let user through
+  try {
+    const apiKey = process.env.ABSTRACT_EMAIL_API_KEY;
+    if (!apiKey) {
+      console.warn('⚠️ ABSTRACT_EMAIL_API_KEY is missing. Skipping Tier 2 email check.');
+      return false;
+    }
+
+    const response = await axios.get(`https://emailvalidation.abstractapi.com/v1/?api_key=${apiKey}&email=${email}`, {
+      timeout: 2000 // Strict 2 second timeout
+    });
+
+    if (response.data?.is_disposable_email?.value === true) {
+      console.log(`🚫 Blocked disposable email via Abstract API (Order): ${email}`);
+      return true;
+    }
+
+    return false;
+  } catch (error) {
+    console.error('❌ Tier 2 Email Check Error (Order):', error.message);
+    return false; // Fail-safe: allow order if API is down
+  }
 };
 import { sendPushNotificationToAdmins } from '../routes/notificationRoutes.js';
 import { sendOrderConfirmationEmail, sendOrderStatusUpdateEmail, sendAdminNotification } from '../utils/email.js';
@@ -45,8 +75,8 @@ export const createOrder = async (req, res) => {
       });
     }
 
-    // SECURITY: Block disposable emails
-    if (isEmailDisposable(contactEmail)) {
+    // SECURITY: Block disposable emails (Tiered Defense)
+    if (await isEmailDisposable(contactEmail)) {
       return res.status(400).json({
         success: false,
         message: 'Orders from temporary/disposable email addresses are not allowed. Please use a permanent email address.'
