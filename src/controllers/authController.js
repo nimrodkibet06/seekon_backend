@@ -163,19 +163,22 @@ export const sendVerificationCode = async (req, res) => {
   try {
     const { email } = req.body;
 
+    // SECURITY: Block disposable emails at the very start
+    if (email) {
+      const domain = email.split('@')[1].toLowerCase();
+      if (disposableDomains.includes(domain)) {
+        return res.status(400).json({
+          success: false,
+          message: 'Registration from temporary/disposable email addresses is not allowed. Please use a permanent email address.'
+        });
+      }
+    }
+
     // Validate input
     if (!email) {
       return res.status(400).json({
         success: false,
         message: 'Email is required'
-      });
-    }
-
-    // SECURITY: Block disposable emails
-    if (isEmailDisposable(email)) {
-      return res.status(400).json({
-        success: false,
-        message: 'Registration from temporary/disposable email addresses is not allowed. Please use a permanent email address.'
       });
     }
 
@@ -961,6 +964,17 @@ export const verifyEmail = async (req, res) => {
 export const resendVerificationEmail = async (req, res) => {
   try {
     const { email } = req.body;
+
+    // SECURITY: Block disposable emails
+    if (email) {
+      const domain = email.split('@')[1].toLowerCase();
+      if (disposableDomains.includes(domain)) {
+        return res.status(400).json({
+          success: false,
+          message: 'Registration from temporary/disposable email addresses is not allowed. Please use a permanent email address.'
+        });
+      }
+    }
 
     if (!email) {
       return res.status(400).json({
