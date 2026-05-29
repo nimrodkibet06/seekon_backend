@@ -158,12 +158,21 @@ export const pruneOldBackups = async (retentionDays = 30) => {
     for (const file of data.files || []) {
       const created = new Date(file.createdTime).getTime();
       if (created < cutoff) {
-        await drive.files.delete({
-          fileId: file.id,
-          supportsAllDrives: true,
-        });
-        deleted += 1;
-        console.log(`[Drive] Deleted expired backup: ${file.name}`);
+        try {
+          await drive.files.delete({
+            fileId: file.id,
+            supportsAllDrives: true,
+          });
+          deleted += 1;
+          console.log(`[Drive] Deleted expired backup: ${file.name}`);
+        } catch (deleteError) {
+          if (deleteError.message?.toLowerCase().includes('permission') || deleteError.status === 403) {
+            console.warn(`⚠️ [Drive] Skipped deleting old backup file ${file.id} (${file.name}) due to insufficient permissions.`);
+          } else {
+            console.error(`⚠️ [Drive] Error deleting old backup file ${file.id} (${file.name}):`, deleteError.message);
+          }
+          // Continue to next file instead of throwing
+        }
       }
     }
 
