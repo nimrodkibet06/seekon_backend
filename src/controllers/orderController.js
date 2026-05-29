@@ -25,8 +25,8 @@ const isEmailDisposable = async (email) => {
   // Strict Fail-Safe: If API fails or key is missing, return false to let user through
   try {
     const apiKey = process.env.ABSTRACT_EMAIL_API_KEY;
-    if (!apiKey) {
-      console.warn('⚠️ ABSTRACT_EMAIL_API_KEY is missing. Skipping Tier 2 email check.');
+    if (!apiKey || apiKey === 'your_abstract_api_key') {
+      console.warn('⚠️ ABSTRACT_EMAIL_API_KEY is missing or using placeholder. Skipping Tier 2 email check.');
       return false;
     }
 
@@ -41,8 +41,12 @@ const isEmailDisposable = async (email) => {
 
     return false;
   } catch (error) {
-    console.error('❌ Tier 2 Email Check Error (Order):', error.message);
-    return false; // Fail-safe: allow order if API is down
+    if (error.response?.status === 401) {
+      console.error('❌ Abstract API 401 Unauthorized: Your API key is invalid or has expired. Please check ABSTRACT_EMAIL_API_KEY in .env');
+    } else {
+      console.error('❌ Tier 2 Email Check Error (Order):', error.message);
+    }
+    return false; // Fail-safe: allow order if API is down or unauthorized
   }
 };
 import { sendPushNotificationToAdmins } from '../routes/notificationRoutes.js';
