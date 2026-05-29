@@ -2,6 +2,8 @@
 import { Readable } from 'stream';
 
 const CALLBACK_URI = 'https://developers.google.com/oauthplayground';
+// SCOPE: 'https://www.googleapis.com/auth/drive' (Upgraded from drive.file to full drive access)
+const DRIVE_SCOPE = 'https://www.googleapis.com/auth/drive';
 
 let driveClient = null;
 let oauth2Client = null;
@@ -166,10 +168,11 @@ export const pruneOldBackups = async (retentionDays = 30) => {
           deleted += 1;
           console.log(`[Drive] Deleted expired backup: ${file.name}`);
         } catch (deleteError) {
-          if (deleteError.message?.toLowerCase().includes('permission') || deleteError.status === 403) {
-            console.warn(`⚠️ [Drive] Skipped deleting old backup file ${file.id} (${file.name}) due to insufficient permissions.`);
+          const errMsg = deleteError.message || 'Unknown error';
+          if (errMsg.toLowerCase().includes('permission') || deleteError.status === 403) {
+            console.warn(`⚠️ [Drive] Skipped deleting old backup file ${file.id} (${file.name}) due to insufficient permissions. Detail: ${errMsg}`);
           } else {
-            console.error(`⚠️ [Drive] Error deleting old backup file ${file.id} (${file.name}):`, deleteError.message);
+            console.error(`⚠️ [Drive] Error deleting old backup file ${file.id} (${file.name}):`, errMsg);
           }
           // Continue to next file instead of throwing
         }
