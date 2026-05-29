@@ -8,7 +8,7 @@ import disposableDomains from 'disposable-email-blocklist';
  */
 const isEmailDisposable = (email) => {
   if (!email) return false;
-  const domain = email.split('@')[1];
+  const domain = email.split('@')[1].toLowerCase();
   return disposableDomains.includes(domain);
 };
 import { sendVerificationEmail, sendPasswordResetEmail, sendOTPEmail, sendWelcomeEmail } from '../utils/email.js';
@@ -277,7 +277,13 @@ export const register = async (req, res) => {
       });
     }
 
-    // Production-ready password validation
+    // SECURITY: Block disposable emails
+    if (isEmailDisposable(email)) {
+      return res.status(400).json({
+        success: false,
+        message: 'Registration from temporary/disposable email addresses is not allowed. Please use a permanent email address.'
+      });
+    }
     if (password.length < 8) {
       return res.status(400).json({
         success: false,

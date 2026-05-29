@@ -12,7 +12,7 @@ import disposableDomains from 'disposable-email-blocklist';
  */
 const isEmailDisposable = (email) => {
   if (!email) return false;
-  const domain = email.split('@')[1];
+  const domain = email.split('@')[1].toLowerCase();
   return disposableDomains.includes(domain);
 };
 import { sendPushNotificationToAdmins } from '../routes/notificationRoutes.js';
