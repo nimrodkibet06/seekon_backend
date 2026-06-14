@@ -40,7 +40,6 @@ export const initWhatsAppClient = async () => {
       '--no-sandbox',
       '--disable-setuid-sandbox',
       '--disable-dev-shm-usage',
-      '--single-process',
       '--disable-gpu',
       '--blink-settings=imagesEnabled=false'
     ]
