@@ -46,6 +46,7 @@
     "nodemailer": "^7.0.13",
     "qrcode-terminal": "^0.12.0",
     "resend": "^6.9.1",
+    "puppeteer": "^24.38.0",
     "web-push": "^3.6.7",
     "whatsapp-web.js": "^1.34.7"
   },

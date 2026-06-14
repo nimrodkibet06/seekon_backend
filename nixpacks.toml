@@ -1,4 +1,23 @@
 [phases.setup]
+nixPkgs = [
+  "glib",
+  "nss",
+  "nspr",
+  "atk",
+  "at-spi2-atk",
+  "cups",
+  "libdrm",
+  "libxkbcommon",
+  "libXcomposite",
+  "libXdamage",
+  "libXext",
+  "libXfixes",
+  "libXrandr",
+  "libgbm",
+  "expat",
+  "alsa-lib",
+  "mesa"
+]
 aptPkgs = [
   "chromium",
   "wget",
