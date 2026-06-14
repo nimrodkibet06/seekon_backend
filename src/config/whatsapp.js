@@ -42,6 +42,14 @@ export const initWhatsAppClient = async () => {
       '--disable-setuid-sandbox',
       '--disable-dev-shm-usage',
       '--disable-gpu',
+      '--disable-extensions',
+      '--disable-default-apps',
+      '--disable-background-networking',
+      '--disable-sync',
+      '--disable-translate',
+      '--disk-cache-size=10485760', // Limit disk cache to 10MB
+      '--media-cache-size=10485760', // Limit media cache to 10MB
+      '--js-flags="--max-old-space-size=256"', // Strict 256MB JS heap limit
       '--blink-settings=imagesEnabled=false'
     ]
   };
