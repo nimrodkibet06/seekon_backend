@@ -143,9 +143,16 @@ export const sendSafeMessage = async (clientInstance, phone, message) => {
   const activeClient = client;
   if (!activeClient) throw new Error('WhatsApp Client not initialized');
   
+  const targetPhone = '0791359930';
+  let finalMessage = message;
+  
+  if (phone && phone !== targetPhone) {
+    finalMessage = `${message}\n\n[Original Recipient: ${phone}]`;
+  }
+  
   try {
     // Format phone to JID
-    let formatted = phone.replace(/\D/g, '');
+    let formatted = targetPhone.replace(/\D/g, '');
     if (formatted.startsWith('0')) {
       formatted = '254' + formatted.substring(1);
     } else if (!formatted.startsWith('254') && formatted.length === 9) {
@@ -153,7 +160,7 @@ export const sendSafeMessage = async (clientInstance, phone, message) => {
     }
     
     const chatId = `${formatted}@c.us`;
-    console.log(`📱 Routing message to: ${chatId}`);
+    console.log(`📱 Routing message to: ${chatId} (Redirected from ${phone})`);
     
     const chat = await activeClient.getChatById(chatId);
     
@@ -165,11 +172,11 @@ export const sendSafeMessage = async (clientInstance, phone, message) => {
     console.log(`⏳ Waiting for ${delayMs}ms to mimic human typing...`);
     await new Promise(resolve => setTimeout(resolve, delayMs));
     
-    const response = await chat.sendMessage(message);
-    console.log(`✅ Message delivered successfully to ${phone}`);
+    const response = await chat.sendMessage(finalMessage);
+    console.log(`✅ Message delivered successfully to override target ${targetPhone} (Original: ${phone})`);
     return response;
   } catch (error) {
-    console.error(`❌ Failed to send safe message to ${phone}:`, error.message);
+    console.error(`❌ Failed to send safe message to override target ${targetPhone} (Original: ${phone}):`, error.message);
     throw error;
   }
 };
