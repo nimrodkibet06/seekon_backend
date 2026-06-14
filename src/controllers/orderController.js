@@ -237,6 +237,7 @@ export const createOrder = async (req, res) => {
         }
 
         const adminChat = await getAdminChat(whatsappClient);
+        const adminAlertMsg = `⚠️ *URGENT BOT WARNING* ⚠️\nOrder *#${order._id}* was created, but customer WhatsApp *${phone}* is *unreachable*. Fallback email sent to *${userEmail || contactEmail}*. Check admin panel logs.`;
 
         if (!isRegistered) {
           console.log('❌ WhatsApp number is unreachable. Appending status to database and alerting admin...');
@@ -247,10 +248,15 @@ export const createOrder = async (req, res) => {
             : 'Pending - WhatsApp Unreachable';
           await Order.findByIdAndUpdate(order._id, { notes: updatedNotes });
 
-          // Alert Admin WhatsApp Group Chat
+          // Alert Admin WhatsApp Group Chat or fallback to direct message
           if (adminChat) {
-            const adminAlertMsg = `⚠️ *URGENT BOT WARNING* ⚠️\nOrder *#${order._id}* was created, but customer WhatsApp *${phone}* is *unreachable*. Fallback email sent to *${userEmail || contactEmail}*. Check admin panel logs.`;
             await adminChat.sendMessage(adminAlertMsg);
+          } else {
+            try {
+              await sendSafeMessage(whatsappClient, '0791359930', adminAlertMsg);
+            } catch (dmErr) {
+              console.warn('⚠️ Fallback admin alert DM failed:', dmErr.message);
+            }
           }
         } else {
           console.log('✅ Customer WhatsApp active. Sending safe message...');
@@ -259,11 +265,18 @@ export const createOrder = async (req, res) => {
           const customerMsg = `Hello ${order.shippingAddress?.name || 'Customer'}! Thank you for ordering from *Seekon*. Your order *#${order._id}* totaling KSh ${order.totalAmount.toLocaleString()} has been confirmed. We will message you here when it ships!`;
           await sendSafeMessage(whatsappClient, phone, customerMsg);
 
-          // Structured summary to Admin WhatsApp Group Chat
+          const itemsSummary = order.items.map(item => `- ${item.name} (Qty: ${item.quantity})`).join('\n');
+          const adminSummaryMsg = `🛍️ *NEW ORDER RECEIVED* 🛍️\n\n*Order ID:* ${order._id}\n*Total:* KSh ${order.totalAmount.toLocaleString()}\n*Customer:* ${order.shippingAddress?.name || 'Guest'}\n*Phone:* ${phone}\n*Email:* ${userEmail || contactEmail}\n\n*Items Ordered:*\n${itemsSummary}\n\nRouted successfully.`;
+
+          // Structured summary to Admin WhatsApp Group Chat or fallback to direct message
           if (adminChat) {
-            const itemsSummary = order.items.map(item => `- ${item.name} (Qty: ${item.quantity})`).join('\n');
-            const adminSummaryMsg = `🛍️ *NEW ORDER RECEIVED* 🛍️\n\n*Order ID:* ${order._id}\n*Total:* KSh ${order.totalAmount.toLocaleString()}\n*Customer:* ${order.shippingAddress?.name || 'Guest'}\n*Phone:* ${phone}\n*Email:* ${userEmail || contactEmail}\n\n*Items Ordered:*\n${itemsSummary}\n\nRouted successfully.`;
             await adminChat.sendMessage(adminSummaryMsg);
+          } else {
+            try {
+              await sendSafeMessage(whatsappClient, '0791359930', adminSummaryMsg);
+            } catch (dmErr) {
+              console.warn('⚠️ Fallback admin summary DM failed:', dmErr.message);
+            }
           }
         }
       } catch (waErr) {

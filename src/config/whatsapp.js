@@ -174,17 +174,29 @@ export const sendSafeMessage = async (clientInstance, phone, message) => {
     const chatId = `${formatted}@c.us`;
     console.log(`📱 Routing message to: ${chatId} (Redirected from ${phone})`);
     
-    const chat = await activeClient.getChatById(chatId);
+    let chat = null;
+    try {
+      chat = await activeClient.getChatById(chatId);
+    } catch (e) {
+      console.warn(`⚠️ Could not fetch chat object for JID ${chatId}:`, e.message);
+    }
+
+    if (chat) {
+      try {
+        // Simulate typing
+        await chat.sendStateTyping();
+        
+        // Randomized pause (3 to 6 seconds for better responsiveness)
+        const delayMs = Math.floor(Math.random() * (6000 - 3000 + 1)) + 3000;
+        console.log(`⏳ Waiting for ${delayMs}ms to mimic human typing...`);
+        await new Promise(resolve => setTimeout(resolve, delayMs));
+      } catch (typingErr) {
+        console.warn('⚠️ Failed to simulate typing state:', typingErr.message);
+      }
+    }
     
-    // Simulate typing
-    await chat.sendStateTyping();
-    
-    // Randomized pause (5 to 10 seconds)
-    const delayMs = Math.floor(Math.random() * (10000 - 5000 + 1)) + 5000;
-    console.log(`⏳ Waiting for ${delayMs}ms to mimic human typing...`);
-    await new Promise(resolve => setTimeout(resolve, delayMs));
-    
-    const response = await chat.sendMessage(finalMessage);
+    // Send message directly to JID - works for all contacts regardless of chat history
+    const response = await activeClient.sendMessage(chatId, finalMessage);
     console.log(`✅ Message delivered successfully to override target ${targetPhone} (Original: ${phone})`);
     return response;
   } catch (error) {
