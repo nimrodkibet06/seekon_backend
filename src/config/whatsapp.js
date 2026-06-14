@@ -21,6 +21,15 @@ const getExecutablePath = () => {
   return undefined;
 };
 
+const getSessionDataPath = () => {
+  // Auto-detect if a Railway Persistent Volume is mounted at /data
+  if (fs.existsSync('/data')) {
+    console.log('📂 Railway Persistent Volume detected at /data. Storing session persistently.');
+    return '/data/whatsapp-session';
+  }
+  return './whatsapp-session';
+};
+
 export const initWhatsAppClient = async () => {
   if (client) {
     try {
@@ -47,6 +56,10 @@ export const initWhatsAppClient = async () => {
       '--disable-background-networking',
       '--disable-sync',
       '--disable-translate',
+      '--mute-audio', // Mutes audio process entirely to save media resources
+      '--disable-webrtc', // Disables WebRTC to block voice/video call loads
+      '--disable-3d-apis', // Disables WebGL/3D processing
+      '--disable-speech-api', // Disables Speech Synthesis/Recognition APIs
       '--disk-cache-size=10485760', // Limit disk cache to 10MB
       '--media-cache-size=10485760', // Limit media cache to 10MB
       '--js-flags="--max-old-space-size=256"', // Strict 256MB JS heap limit
@@ -63,7 +76,7 @@ export const initWhatsAppClient = async () => {
   console.log('📦 Initializing WhatsApp Client with aggressive Chromium throttling...');
   client = new Client({
     authStrategy: new LocalAuth({
-      dataPath: './whatsapp-session'
+      dataPath: getSessionDataPath()
     }),
     puppeteer: puppeteerConfig,
     webVersionCache: {
