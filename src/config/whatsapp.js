@@ -56,7 +56,11 @@ export const initWhatsAppClient = async () => {
     authStrategy: new LocalAuth({
       dataPath: './whatsapp-session'
     }),
-    puppeteer: puppeteerConfig
+    puppeteer: puppeteerConfig,
+    webVersionCache: {
+      type: 'remote',
+      remotePath: 'https://raw.githubusercontent.com/wppconnect-team/wa-version/main/html/2.2412.54.html',
+    }
   });
 
   client.on('qr', (qr) => {
@@ -64,6 +68,14 @@ export const initWhatsAppClient = async () => {
     isConnected = false;
     console.log('📍 WhatsApp QR Code Received. Scan it to authenticate:');
     qrcode.generate(qr, { small: true });
+  });
+
+  client.on('authenticated', () => {
+    console.log('✅ WhatsApp Client Authenticated successfully!');
+  });
+
+  client.on('auth_failure', (msg) => {
+    console.error('❌ WhatsApp Authentication Failure:', msg);
   });
 
   client.on('ready', () => {
