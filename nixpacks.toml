@@ -1,5 +1,6 @@
 [phases.setup]
 aptPkgs = [
+  "chromium",
   "wget",
   "ca-certificates",
   "fonts-liberation",

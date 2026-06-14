@@ -2,10 +2,24 @@ import pkg from 'whatsapp-web.js';
 const { Client, LocalAuth } = pkg;
 import qrcode from 'qrcode-terminal';
 import { sendAdminOfflineAlertEmail } from '../utils/email.js';
+import fs from 'fs';
 
 let currentQR = null;
 let isConnected = false;
 let client = null;
+
+const getExecutablePath = () => {
+  if (process.env.PUPPETEER_EXECUTABLE_PATH) {
+    return process.env.PUPPETEER_EXECUTABLE_PATH;
+  }
+  if (fs.existsSync('/usr/bin/chromium')) {
+    return '/usr/bin/chromium';
+  }
+  if (fs.existsSync('/usr/bin/chromium-browser')) {
+    return '/usr/bin/chromium-browser';
+  }
+  return undefined;
+};
 
 export const initWhatsAppClient = async () => {
   if (client) {
@@ -20,22 +34,30 @@ export const initWhatsAppClient = async () => {
   currentQR = null;
   isConnected = false;
 
+  const puppeteerConfig = {
+    headless: true,
+    args: [
+      '--no-sandbox',
+      '--disable-setuid-sandbox',
+      '--disable-dev-shm-usage',
+      '--single-process',
+      '--disable-gpu',
+      '--blink-settings=imagesEnabled=false'
+    ]
+  };
+
+  const executablePath = getExecutablePath();
+  if (executablePath) {
+    puppeteerConfig.executablePath = executablePath;
+    console.log(`🔍 Forcing Puppeteer executablePath to: ${executablePath}`);
+  }
+
   console.log('📦 Initializing WhatsApp Client with aggressive Chromium throttling...');
   client = new Client({
     authStrategy: new LocalAuth({
       dataPath: './whatsapp-session'
     }),
-    puppeteer: {
-      headless: true,
-      args: [
-        '--no-sandbox',
-        '--disable-setuid-sandbox',
-        '--disable-dev-shm-usage',
-        '--single-process',
-        '--disable-gpu',
-        '--blink-settings=imagesEnabled=false'
-      ]
-    }
+    puppeteer: puppeteerConfig
   });
 
   client.on('qr', (qr) => {
