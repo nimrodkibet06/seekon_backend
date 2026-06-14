@@ -51,6 +51,7 @@ const isEmailDisposable = async (email) => {
 };
 import { sendPushNotificationToAdmins } from '../routes/notificationRoutes.js';
 import { sendOrderConfirmationEmail, sendOrderStatusUpdateEmail, sendAdminNotification } from '../utils/email.js';
+import whatsappClient, { sendSafeMessage, getAdminChat } from '../config/whatsapp.js';
 
 // Create Order
 export const createOrder = async (req, res) => {
@@ -65,7 +66,9 @@ export const createOrder = async (req, res) => {
       deliveryDate,
       convenientTime,
       contactEmail: bodyContactEmail,
-      email: bodyEmail
+      email: bodyEmail,
+      shippingPrice,
+      shippingMethod
     } = req.body;
 
     const contactEmail = (bodyContactEmail || bodyEmail || req.user?.email || shippingAddress?.email || '')
@@ -150,6 +153,8 @@ export const createOrder = async (req, res) => {
       shippingAddress: mappedShippingAddress,
       deliveryDate,
       convenientTime,
+      shippingPrice: shippingPrice || 0,
+      shippingMethod: shippingMethod || '',
       status: 'pending',
       isPaid: false
     });
@@ -176,36 +181,95 @@ export const createOrder = async (req, res) => {
       console.error('⚠️ Error sending push notification:', pushError.message);
     }
 
-    // Send confirmation email to customer (async - non-blocking)
-    if (userEmail) {
-      sendOrderConfirmationEmail(userEmail, order).catch(err => 
-        console.error('⚠️ Error sending order confirmation email:', err.message)
-      );
-    }
-
-    // Notify Admin of New Order (async - non-blocking)
-    const adminMsg = `A new order (#${order._id}) totaling KES ${order.totalAmount} has just been placed! Log into the admin dashboard to process it.`;
-    try {
-      // First, try fetching from the dedicated Admin model
-      let admins = [];
-      try { admins = await Admin.find({}).select('email'); } catch(e) {}
-      
-      // If no dedicated admins, fallback to Users with admin role
-      if (!admins || admins.length === 0) {
-        admins = await User.find({ role: 'admin' }).select('email');
+    // Start Asynchronous, Non-Blocking Email and WhatsApp Pipeline
+    (async () => {
+      // 1. Dispatch Customer Order Receipt Email Immediately
+      if (userEmail) {
+        try {
+          await sendOrderConfirmationEmail(userEmail, order);
+          console.log('✅ World-class luxury order confirmation email sent to customer.');
+        } catch (emailErr) {
+          console.error('⚠️ Error sending customer order confirmation email:', emailErr.message);
+        }
       }
 
-      const adminEmails = admins.map(a => a.email).filter(Boolean);
-      
-      sendAdminNotification('🚨 New Order Received!', adminMsg, adminEmails).catch(err =>
-        console.error('⚠️ Error sending admin notification email:', err.message)
-      );
-    } catch (adminErr) {
-      console.error('⚠️ Error fetching admin users:', adminErr.message);
-      sendAdminNotification('🚨 New Order Received!', adminMsg).catch(err =>
-        console.error('⚠️ Error sending admin notification email:', err.message)
-      );
-    }
+      // Also send Admin Notification Email
+      const adminMsg = `A new order (#${order._id}) totaling KES ${order.totalAmount} has just been placed! Log into the admin dashboard to process it.`;
+      try {
+        let admins = [];
+        try { admins = await Admin.find({}).select('email'); } catch(e) {}
+        if (!admins || admins.length === 0) {
+          admins = await User.find({ role: 'admin' }).select('email');
+        }
+        const adminEmails = admins.map(a => a.email).filter(Boolean);
+        await sendAdminNotification('🚨 New Order Received!', adminMsg, adminEmails);
+      } catch (adminErr) {
+        console.error('⚠️ Error fetching admins or sending admin notification:', adminErr.message);
+        try {
+          await sendAdminNotification('🚨 New Order Received!', adminMsg);
+        } catch (e) {}
+      }
+
+      // 2. Non-blocking WhatsApp Pipeline
+      try {
+        const phone = order.shippingAddress?.phone || order.guestPhone;
+        if (!phone) {
+          console.log('⚠️ No phone number available for WhatsApp notification routing.');
+          return;
+        }
+
+        // Clean & format the phone number
+        let formattedPhone = phone.replace(/\D/g, '');
+        if (formattedPhone.startsWith('0')) {
+          formattedPhone = '254' + formattedPhone.substring(1);
+        } else if (!formattedPhone.startsWith('254') && formattedPhone.length === 9) {
+          formattedPhone = '254' + formattedPhone;
+        }
+
+        const jid = `${formattedPhone}@c.us`;
+        console.log(`🔍 Checking if WhatsApp user exists for: ${jid}`);
+        
+        let isRegistered = false;
+        try {
+          isRegistered = await whatsappClient.isRegisteredUser(jid);
+        } catch (regErr) {
+          console.error('⚠️ Error verifying WhatsApp user registration status:', regErr.message);
+        }
+
+        const adminChat = await getAdminChat(whatsappClient);
+
+        if (!isRegistered) {
+          console.log('❌ WhatsApp number is unreachable. Appending status to database and alerting admin...');
+          
+          // Append status to database (order.notes)
+          const updatedNotes = order.notes 
+            ? `${order.notes}\nPending - WhatsApp Unreachable` 
+            : 'Pending - WhatsApp Unreachable';
+          await Order.findByIdAndUpdate(order._id, { notes: updatedNotes });
+
+          // Alert Admin WhatsApp Group Chat
+          if (adminChat) {
+            const adminAlertMsg = `⚠️ *URGENT BOT WARNING* ⚠️\nOrder *#${order._id}* was created, but customer WhatsApp *${phone}* is *unreachable*. Fallback email sent to *${userEmail || contactEmail}*. Check admin panel logs.`;
+            await adminChat.sendMessage(adminAlertMsg);
+          }
+        } else {
+          console.log('✅ Customer WhatsApp active. Sending safe message...');
+          
+          // Send safe message to customer
+          const customerMsg = `Hello ${order.shippingAddress?.name || 'Customer'}! Thank you for ordering from *Seekon*. Your order *#${order._id}* totaling KSh ${order.totalAmount.toLocaleString()} has been confirmed. We will message you here when it ships!`;
+          await sendSafeMessage(whatsappClient, phone, customerMsg);
+
+          // Structured summary to Admin WhatsApp Group Chat
+          if (adminChat) {
+            const itemsSummary = order.items.map(item => `- ${item.name} (Qty: ${item.quantity})`).join('\n');
+            const adminSummaryMsg = `🛍️ *NEW ORDER RECEIVED* 🛍️\n\n*Order ID:* ${order._id}\n*Total:* KSh ${order.totalAmount.toLocaleString()}\n*Customer:* ${order.shippingAddress?.name || 'Guest'}\n*Phone:* ${phone}\n*Email:* ${userEmail || contactEmail}\n\n*Items Ordered:*\n${itemsSummary}\n\nRouted successfully.`;
+            await adminChat.sendMessage(adminSummaryMsg);
+          }
+        }
+      } catch (waErr) {
+        console.error('⚠️ Non-blocking WhatsApp operations failed:', waErr.message);
+      }
+    })();
 
     res.status(201).json({
       success: true,

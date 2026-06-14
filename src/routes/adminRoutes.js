@@ -44,6 +44,7 @@ import {
 } from '../controllers/couponController.js';
 import { authMiddleware, adminMiddleware } from '../middleware/auth.js';
 import Notification from '../models/Notification.js';
+import { getStatus } from '../config/whatsapp.js';
 
 const router = express.Router();
 
@@ -63,6 +64,11 @@ const adminLoginLimiter = rateLimit({
 router.post('/login', adminLoginLimiter, adminLogin);
 
 // Protected routes - require authentication
+router.get('/bot-status', authMiddleware, adminMiddleware, (req, res) => {
+  const { connected, qr } = getStatus();
+  res.status(200).json({ connected, qr });
+});
+
 router.get('/stats', authMiddleware, adminMiddleware, getAdminStats);
 router.get('/analytics', authMiddleware, adminMiddleware, getAnalytics);
 router.get('/dashboard', authMiddleware, adminMiddleware, getDashboardStats);

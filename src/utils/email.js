@@ -290,61 +290,311 @@ export const sendOrderConfirmationEmail = async (email, order) => {
   const frontendUrl = process.env.FRONTEND_URL || 'https://www.seekonapparelglobal.com';
   
   const itemsList = order.items.map(item => `
-    <tr>
-      <td style="padding: 10px; border-bottom: 1px solid #eee;">
-        <img src="${item.image || ''}" alt="${item.name}" style="width: 50px; height: 50px; object-fit: cover; border-radius: 5px;" />
+    <tr class="item-tr">
+      <td style="width: 70px;">
+        <img src="${item.image || 'https://via.placeholder.com/60'}" alt="${item.name}" class="item-image" />
       </td>
-      <td style="padding: 10px; border-bottom: 1px solid #eee;">${item.name}</td>
-      <td style="padding: 10px; border-bottom: 1px solid #eee;">${item.quantity}</td>
-      <td style="padding: 10px; border-bottom: 1px solid #eee;">KSh ${item.price.toLocaleString()}</td>
+      <td>
+        <div class="item-details">
+          <div class="item-name">${item.name}</div>
+          <div class="item-specs">
+            ${item.size ? `Size: ${item.size}` : ''} 
+            ${item.color ? `| Color: ${item.color}` : ''}
+          </div>
+        </div>
+      </td>
+      <td class="item-qty">x${item.quantity}</td>
+      <td class="item-price">KSh ${item.price.toLocaleString()}</td>
     </tr>
   `).join('');
 
   const orderHtml = `
-    <div style="font-family: Arial, sans-serif; max-width: 600px; margin: 0 auto; padding: 20px;">
-      <div style="text-align: center; margin-bottom: 30px;">
-        <h1 style="color: #00A676; margin: 0;">SEEKON</h1>
-        <p style="color: #666; margin: 5px 0 0 0;">Order Confirmation</p>
+    <!DOCTYPE html>
+    <html>
+    <head>
+      <meta charset="utf-8">
+      <meta name="viewport" content="width=device-width, initial-scale=1.0">
+      <style>
+        body {
+          background-color: #FAFAF9;
+          color: #0C0A09;
+          font-family: 'Montserrat', -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+          margin: 0;
+          padding: 0;
+          -webkit-font-smoothing: antialiased;
+        }
+        .email-container {
+          max-width: 600px;
+          margin: 40px auto;
+          background-color: #FFFFFF;
+          border: 1px solid #D6D3D1;
+        }
+        .header {
+          padding: 40px 20px;
+          text-align: center;
+          border-bottom: 1px solid #FAFAF9;
+        }
+        .logo {
+          font-family: 'Cormorant', Georgia, serif;
+          font-size: 36px;
+          font-weight: 600;
+          letter-spacing: 6px;
+          margin: 0;
+          text-transform: uppercase;
+          color: #1C1917;
+        }
+        .subtitle {
+          font-size: 11px;
+          text-transform: uppercase;
+          letter-spacing: 3px;
+          color: #44403C;
+          margin-top: 5px;
+        }
+        .hero {
+          text-align: center;
+          padding: 30px 40px;
+        }
+        .hero h2 {
+          font-family: 'Cormorant', Georgia, serif;
+          font-size: 28px;
+          font-weight: 500;
+          margin-top: 0;
+          margin-bottom: 15px;
+          color: #1C1917;
+        }
+        .hero p {
+          font-size: 14px;
+          color: #44403C;
+          line-height: 1.6;
+          margin: 0;
+        }
+        .order-meta {
+          padding: 24px 40px;
+          background-color: #FAFAF9;
+          border-top: 1px solid #D6D3D1;
+          border-bottom: 1px solid #D6D3D1;
+        }
+        .meta-grid {
+          display: table;
+          width: 100%;
+        }
+        .meta-col {
+          display: table-cell;
+          width: 50%;
+          font-size: 12px;
+          line-height: 1.6;
+          vertical-align: top;
+        }
+        .meta-title {
+          font-weight: 600;
+          text-transform: uppercase;
+          letter-spacing: 1px;
+          color: #1C1917;
+          margin-bottom: 6px;
+        }
+        .meta-value {
+          color: #44403C;
+        }
+        .order-items {
+          padding: 40px;
+        }
+        .item-table {
+          width: 100%;
+          border-collapse: collapse;
+        }
+        .item-th {
+          font-family: 'Cormorant', Georgia, serif;
+          font-size: 16px;
+          font-weight: 600;
+          text-align: left;
+          border-bottom: 1px solid #1C1917;
+          padding-bottom: 12px;
+          color: #1C1917;
+        }
+        .item-tr td {
+          padding: 20px 0;
+          border-bottom: 1px solid #E8ECF0;
+          vertical-align: middle;
+        }
+        .item-image {
+          width: 60px;
+          height: 60px;
+          object-fit: cover;
+          border: 1px solid #D6D3D1;
+        }
+        .item-details {
+          font-size: 13px;
+          line-height: 1.4;
+          padding-left: 15px;
+        }
+        .item-name {
+          font-weight: 500;
+          color: #1C1917;
+          margin-bottom: 4px;
+        }
+        .item-specs {
+          font-size: 11px;
+          color: #44403C;
+        }
+        .item-qty {
+          font-size: 13px;
+          color: #44403C;
+          text-align: center;
+        }
+        .item-price {
+          font-size: 13px;
+          font-weight: 500;
+          color: #1C1917;
+          text-align: right;
+        }
+        .total-section {
+          margin-top: 20px;
+          border-top: 1px solid #1C1917;
+          padding-top: 20px;
+          text-align: right;
+        }
+        .total-row {
+          margin-bottom: 8px;
+          font-size: 13px;
+          color: #44403C;
+        }
+        .total-amount {
+          font-family: 'Cormorant', Georgia, serif;
+          font-size: 22px;
+          font-weight: 600;
+          color: #1C1917;
+          margin-top: 10px;
+        }
+        .fallback-box {
+          margin: 20px 40px;
+          padding: 24px;
+          background-color: #FAFAF9;
+          border: 1px dashed #D6D3D1;
+          border-radius: 8px;
+        }
+        .fallback-title {
+          font-family: 'Cormorant', Georgia, serif;
+          font-size: 16px;
+          font-weight: 600;
+          color: #1C1917;
+          margin-bottom: 8px;
+          letter-spacing: 0.5px;
+        }
+        .fallback-text {
+          font-size: 12px;
+          color: #44403C;
+          line-height: 1.6;
+          margin: 0;
+        }
+        .cta-container {
+          text-align: center;
+          padding: 20px 40px 40px 40px;
+        }
+        .btn-track {
+          display: inline-block;
+          background-color: #A16207;
+          color: #FFFFFF;
+          padding: 16px 32px;
+          text-decoration: none;
+          font-size: 13px;
+          font-weight: 600;
+          letter-spacing: 2px;
+          text-transform: uppercase;
+          transition: all 200ms ease;
+          border: 1px solid #A16207;
+        }
+        .footer {
+          background-color: #1C1917;
+          padding: 40px 20px;
+          text-align: center;
+          color: #FFFFFF;
+        }
+        .footer p {
+          margin: 0 0 10px 0;
+          font-size: 11px;
+          letter-spacing: 1px;
+          color: #E8ECF0;
+        }
+        .footer a {
+          color: #A16207;
+          text-decoration: none;
+        }
+      </style>
+    </head>
+    <body>
+      <div class="email-container">
+        <div class="header">
+          <div class="logo">SEEKON</div>
+          <div class="subtitle">Luxury Apparel</div>
+        </div>
+        
+        <div class="hero">
+          <h2>Order Confirmed</h2>
+          <p>Thank you for your purchase. We are preparing your luxury pieces with meticulous care. Your structured order details are presented below.</p>
+        </div>
+
+        <div class="order-meta">
+          <div class="meta-grid">
+            <div class="meta-col">
+              <div class="meta-title">Order ID</div>
+              <div class="meta-value">${order._id}</div>
+              <br />
+              <div class="meta-title">Date</div>
+              <div class="meta-value">${new Date(order.createdAt).toLocaleDateString()}</div>
+            </div>
+            <div class="meta-col">
+              <div class="meta-title">Shipping To</div>
+              <div class="meta-value">
+                ${order.shippingAddress?.name || 'Customer'}<br />
+                ${order.shippingAddress?.address || ''}<br />
+                ${order.shippingAddress?.city || ''}<br />
+                ${order.shippingAddress?.phone || ''}
+              </div>
+            </div>
+          </div>
+        </div>
+
+        <div class="order-items">
+          <table class="item-table">
+            <thead>
+              <tr>
+                <th colspan="2" class="item-th">Item</th>
+                <th class="item-th" style="text-align: center;">Qty</th>
+                <th class="item-th" style="text-align: right;">Price</th>
+              </tr>
+            </thead>
+            <tbody>
+              ${itemsList}
+            </tbody>
+          </table>
+
+          <div class="total-section">
+            <div class="total-row">Payment Method: <strong>${order.paymentMethod}</strong></div>
+            <div class="total-amount">Total: KSh ${order.totalAmount.toLocaleString()}</div>
+          </div>
+        </div>
+
+        <div class="fallback-box">
+          <div class="fallback-title">Automated Notification Status</div>
+          <p class="fallback-text">
+            We attempt to route delivery tracking updates and courier details directly to your WhatsApp number: <strong>${order.shippingAddress?.phone || 'N/A'}</strong>. 
+            If this number was entered incorrectly, is disconnected, or if our WhatsApp dispatcher goes offline, all subsequent updates will fall back to this email address.
+          </p>
+        </div>
+
+        <div class="cta-container">
+          <a href="${frontendUrl}/my-orders" class="btn-track" style="color: #FFFFFF;">Track Your Order</a>
+        </div>
+
+        <div class="footer">
+          <p>© ${new Date().getFullYear()} Seekon Apparel. All rights reserved.</p>
+          <p style="font-size: 10px; color: #E8ECF0; margin-top: 15px;">
+            Need help? Contact our boutique concierge at <a href="mailto:support@seekonapparelglobal.com">support@seekonapparelglobal.com</a>
+          </p>
+        </div>
       </div>
-      
-      <div style="background: #f9f9f9; padding: 20px; border-radius: 10px; margin-bottom: 20px;">
-        <p style="margin: 0 0 10px 0;"><strong>Order ID:</strong> ${order._id}</p>
-        <p style="margin: 0 0 10px 0;"><strong>Order Date:</strong> ${new Date(order.createdAt).toLocaleDateString()}</p>
-        <p style="margin: 0;"><strong>Payment Method:</strong> ${order.paymentMethod}</p>
-      </div>
-      
-      <table style="width: 100%; border-collapse: collapse; margin-bottom: 20px;">
-        <thead>
-          <tr style="background: #00A676; color: white;">
-            <th style="padding: 10px; text-align: left;">Product</th>
-            <th style="padding: 10px; text-align: left;">Name</th>
-            <th style="padding: 10px; text-align: left;">Qty</th>
-            <th style="padding: 10px; text-align: left;">Price</th>
-          </tr>
-        </thead>
-        <tbody>
-          ${itemsList}
-        </tbody>
-      </table>
-      
-      <div style="text-align: right; padding: 15px; background: #f4f4f4; border-radius: 8px;">
-        <p style="margin: 0; font-size: 18px;"><strong>Total: KSh ${order.totalAmount.toLocaleString()}</strong></p>
-      </div>
-      
-      ${order.shippingAddress ? `
-      <div style="margin-top: 20px; padding: 15px; background: #f9f9f9; border-radius: 8px;">
-        <h3 style="margin: 0 0 10px 0;">Shipping Address</h3>
-        <p style="margin: 0;">${order.shippingAddress.name}</p>
-        <p style="margin: 0;">${order.shippingAddress.phone}</p>
-        <p style="margin: 0;">${order.shippingAddress.address}</p>
-        <p style="margin: 0;">${order.shippingAddress.city}</p>
-      </div>
-      ` : ''}
-      
-      <div style="margin-top: 30px; text-align: center;">
-        <a href="${frontendUrl}/my-orders" style="display: inline-block; padding: 12px 24px; background-color: #00A676; color: white; text-decoration: none; border-radius: 6px;">Track Your Order</a>
-      </div>
-    </div>
+    </body>
+    </html>
   `;
 
   if (!resend) {
@@ -364,6 +614,157 @@ export const sendOrderConfirmationEmail = async (email, order) => {
   } catch (error) {
     console.error('❌ Error sending order confirmation:', error.message);
     return { success: false };
+  }
+};
+
+// Send Admin Offline Alert Email
+export const sendAdminOfflineAlertEmail = async (adminEmails = null) => {
+  const resend = getResendClient();
+  const frontendUrl = process.env.FRONTEND_URL || 'https://www.seekonapparelglobal.com';
+  const recoveryUrl = `${frontendUrl}/admin/bot-status`;
+
+  let toField;
+  if (adminEmails && Array.isArray(adminEmails) && adminEmails.length > 0) {
+    toField = adminEmails;
+  } else {
+    toField = process.env.ADMIN_NOTIFY_EMAIL || process.env.ADMIN_EMAIL || 'support@seekonapparelglobal.com';
+  }
+
+  const alertHtml = `
+    <!DOCTYPE html>
+    <html>
+    <head>
+      <meta charset="utf-8">
+      <meta name="viewport" content="width=device-width, initial-scale=1.0">
+      <title>URGENT ALERT: WhatsApp Client Offline</title>
+      <style>
+        body {
+          font-family: 'Montserrat', -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+          background-color: #0C0A09;
+          color: #FAFAF9;
+          margin: 0;
+          padding: 0;
+        }
+        .container {
+          max-width: 600px;
+          margin: 40px auto;
+          background-color: #1C1917;
+          border: 1px solid #DC2626;
+          border-radius: 12px;
+          overflow: hidden;
+          box-shadow: 0 10px 15px rgba(0,0,0,0.5);
+        }
+        .header {
+          background-color: #DC2626;
+          padding: 24px;
+          text-align: center;
+        }
+        .header h1 {
+          font-family: 'Cormorant', Georgia, serif;
+          font-size: 28px;
+          font-weight: 700;
+          color: #FFFFFF;
+          margin: 0;
+          letter-spacing: 2px;
+          text-transform: uppercase;
+        }
+        .content {
+          padding: 40px 32px;
+          line-height: 1.6;
+        }
+        .alert-badge {
+          display: inline-block;
+          background-color: rgba(220, 38, 38, 0.15);
+          color: #DC2626;
+          border: 1px solid #DC2626;
+          padding: 8px 16px;
+          border-radius: 20px;
+          font-size: 14px;
+          font-weight: 600;
+          margin-bottom: 24px;
+          text-transform: uppercase;
+          letter-spacing: 1px;
+        }
+        .message {
+          font-size: 16px;
+          color: #D6D3D1;
+          margin-bottom: 32px;
+        }
+        .cta-container {
+          text-align: center;
+          margin-bottom: 32px;
+        }
+        .cta-button {
+          display: inline-block;
+          background-color: #A16207;
+          color: #FFFFFF;
+          padding: 14px 28px;
+          text-decoration: none;
+          border-radius: 8px;
+          font-weight: 600;
+          font-size: 15px;
+          letter-spacing: 1px;
+          text-transform: uppercase;
+          transition: background-color 200ms ease;
+          border: 1px solid #A16207;
+        }
+        .footer {
+          background-color: #0C0A09;
+          padding: 24px;
+          text-align: center;
+          border-top: 1px solid #44403C;
+        }
+        .footer p {
+          margin: 0;
+          font-size: 12px;
+          color: #44403C;
+        }
+      </style>
+    </head>
+    <body>
+      <div class="container">
+        <div class="header">
+          <h1>Seekon Dispatcher</h1>
+        </div>
+        <div class="content">
+          <div style="text-align: center;">
+            <div class="alert-badge">Status: Offline</div>
+          </div>
+          <p class="message">
+            <strong>CRITICAL:</strong> The WhatsApp communication engine has disconnected from the server. Automated WhatsApp messaging routes are currently unavailable. Customers will automatically fallback to receiving standard email order confirmations.
+          </p>
+          <p class="message" style="font-size: 14px; color: #888;">
+            Please visit the admin status portal to scan the generated QR code and re-establish connection.
+          </p>
+          <div class="cta-container">
+            <a href="${recoveryUrl}" class="cta-button" style="color: #FFFFFF;">Access Recovery Portal</a>
+          </div>
+        </div>
+        <div class="footer">
+          <p>© ${new Date().getFullYear()} Seekon Apparel. Internal Admin Alert.</p>
+        </div>
+      </div>
+    </body>
+    </html>
+  `;
+
+  if (!resend) {
+    console.log(`\n📧 ADMIN OFFLINE ALERT (Development)\nTo: ${toField}\nSubject: 🚨 URGENT: WhatsApp Client Offline\n(Development mode - no email sent)`);
+    return { success: true, development: true };
+  }
+
+  try {
+    const data = await resend.emails.send({
+      from: 'Seekon System <noreply@seekonapparelglobal.com>',
+      to: toField,
+      subject: '🚨 URGENT: WhatsApp Client Offline',
+      html: alertHtml
+    });
+    console.log(`✅ Admin offline alert email sent to ${toField}:`, data);
+    return { success: true, data };
+  } catch (error) {
+    console.error('❌ Error sending admin offline alert:', error.message);
+    return { success: false, message: error.message };
   }
 };
 

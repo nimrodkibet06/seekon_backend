@@ -26,6 +26,12 @@ Thumbs.db
 *.pem
 *.key
 
+# WhatsApp Client local session
+whatsapp-session/
+whatsapp-session*
+.wwebjs_auth/
+.wwebjs_cache/
+
 
 
 

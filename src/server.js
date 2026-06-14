@@ -2,6 +2,9 @@
 import dotenv from 'dotenv';
 dotenv.config();
 
+import dns from 'dns';
+dns.setServers(['8.8.8.8', '1.1.1.1']);
+
 // 🚨 CRITICAL: Exit immediately if JWT_SECRET is not configured
 if (!process.env.JWT_SECRET) {
   console.error("❌ JWT_SECRET is missing! Set it in .env file or Railway Environment Variables.");
@@ -128,6 +131,14 @@ app.get('/health', (req, res) => {
     timestamp: new Date().toISOString(),
     uptime: process.uptime()
   });
+});
+
+// Rewrite /api/v1/admin/bot-status to /api/admin/bot-status for versioning compatibility
+app.use((req, res, next) => {
+  if (req.url === '/api/v1/admin/bot-status') {
+    req.url = '/api/admin/bot-status';
+  }
+  next();
 });
 
 // API Routes
