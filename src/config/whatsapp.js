@@ -36,6 +36,7 @@ export const initWhatsAppClient = async () => {
 
   const puppeteerConfig = {
     headless: true,
+    protocolTimeout: 300000, // 5 minutes (prevents protocol timeout crashes during high CPU load/syncing)
     args: [
       '--no-sandbox',
       '--disable-setuid-sandbox',
