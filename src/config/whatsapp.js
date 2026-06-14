@@ -5,56 +5,100 @@ import { sendAdminOfflineAlertEmail } from '../utils/email.js';
 
 let currentQR = null;
 let isConnected = false;
+let client = null;
 
-console.log('📦 Initializing WhatsApp Client with aggressive Chromium throttling...');
-
-const client = new Client({
-  authStrategy: new LocalAuth({
-    dataPath: './whatsapp-session'
-  }),
-  puppeteer: {
-    headless: true,
-    args: [
-      '--no-sandbox',
-      '--disable-setuid-sandbox',
-      '--disable-dev-shm-usage',
-      '--single-process',
-      '--disable-gpu',
-      '--blink-settings=imagesEnabled=false'
-    ]
+export const initWhatsAppClient = async () => {
+  if (client) {
+    try {
+      console.log('🔄 Destroying existing WhatsApp Client instance...');
+      await client.destroy();
+    } catch (e) {
+      console.warn('⚠️ Error destroying existing WhatsApp Client:', e.message);
+    }
   }
-});
 
-client.on('qr', (qr) => {
-  currentQR = qr;
-  isConnected = false;
-  console.log('📍 WhatsApp QR Code Received. Scan it to authenticate:');
-  qrcode.generate(qr, { small: true });
-});
-
-client.on('ready', () => {
-  currentQR = null;
-  isConnected = true;
-  console.log('🚀 WhatsApp Client is READY and ONLINE confirmation logged!');
-});
-
-client.on('disconnected', async (reason) => {
   currentQR = null;
   isConnected = false;
-  console.warn('❌ WhatsApp Client Disconnected:', reason);
-  try {
-    await sendAdminOfflineAlertEmail();
-    console.log('📧 Admin offline alert email sent successfully.');
-  } catch (err) {
-    console.error('⚠️ Failed to send admin offline alert email:', err.message);
-  }
+
+  console.log('📦 Initializing WhatsApp Client with aggressive Chromium throttling...');
+  client = new Client({
+    authStrategy: new LocalAuth({
+      dataPath: './whatsapp-session'
+    }),
+    puppeteer: {
+      headless: true,
+      args: [
+        '--no-sandbox',
+        '--disable-setuid-sandbox',
+        '--disable-dev-shm-usage',
+        '--single-process',
+        '--disable-gpu',
+        '--blink-settings=imagesEnabled=false'
+      ]
+    }
+  });
+
+  client.on('qr', (qr) => {
+    currentQR = qr;
+    isConnected = false;
+    console.log('📍 WhatsApp QR Code Received. Scan it to authenticate:');
+    qrcode.generate(qr, { small: true });
+  });
+
+  client.on('ready', () => {
+    currentQR = null;
+    isConnected = true;
+    console.log('🚀 WhatsApp Client is READY and ONLINE confirmation logged!');
+  });
+
+  client.on('disconnected', async (reason) => {
+    currentQR = null;
+    isConnected = false;
+    console.warn('❌ WhatsApp Client Disconnected:', reason);
+    try {
+      await sendAdminOfflineAlertEmail();
+      console.log('📧 Admin offline alert email sent successfully.');
+    } catch (err) {
+      console.error('⚠️ Failed to send admin offline alert email:', err.message);
+    }
+  });
+
+  await client.initialize();
+};
+
+// Start the client initially
+initWhatsAppClient().catch(err => {
+  console.error('❌ Failed to initialize WhatsApp Client:', err.message);
 });
+
+// A wrapper object to delegate all properties/methods to the active client instance
+const whatsappClient = {
+  isRegisteredUser(...args) {
+    if (!client) throw new Error('WhatsApp Client not initialized');
+    return client.isRegisteredUser(...args);
+  },
+  getChatById(...args) {
+    if (!client) throw new Error('WhatsApp Client not initialized');
+    return client.getChatById(...args);
+  },
+  getChats(...args) {
+    if (!client) throw new Error('WhatsApp Client not initialized');
+    return client.getChats(...args);
+  },
+  sendMessage(...args) {
+    if (!client) throw new Error('WhatsApp Client not initialized');
+    return client.sendMessage(...args);
+  }
+};
 
 // Helper to get Admin Group Chat or fallback
 export const getAdminChat = async (clientInstance) => {
+  const activeClient = client;
+  if (!activeClient) return null;
+  
   if (process.env.ADMIN_WHATSAPP_GROUP_ID) {
     try {
-      const chat = await clientInstance.getChatById(process.env.ADMIN_WHATSAPP_GROUP_ID);
+      const chat = await activeClient.getChatById(process.env.ADMIN_WHATSAPP_GROUP_ID);
       if (chat) return chat;
     } catch (e) {
       console.warn('⚠️ Could not fetch admin group by ID:', e.message);
@@ -62,7 +106,7 @@ export const getAdminChat = async (clientInstance) => {
   }
 
   try {
-    const chats = await clientInstance.getChats();
+    const chats = await activeClient.getChats();
     // Search for a group chat containing "admin" or "seekon" in its name
     const adminChat = chats.find(c => c.isGroup && c.name.toLowerCase().includes('admin'));
     if (adminChat) return adminChat;
@@ -75,6 +119,9 @@ export const getAdminChat = async (clientInstance) => {
 
 // Safe human-mimicking messaging engine utility
 export const sendSafeMessage = async (clientInstance, phone, message) => {
+  const activeClient = client;
+  if (!activeClient) throw new Error('WhatsApp Client not initialized');
+  
   try {
     // Format phone to JID
     let formatted = phone.replace(/\D/g, '');
@@ -87,7 +134,7 @@ export const sendSafeMessage = async (clientInstance, phone, message) => {
     const chatId = `${formatted}@c.us`;
     console.log(`📱 Routing message to: ${chatId}`);
     
-    const chat = await clientInstance.getChatById(chatId);
+    const chat = await activeClient.getChatById(chatId);
     
     // Simulate typing
     await chat.sendStateTyping();
@@ -113,8 +160,4 @@ export const getStatus = () => {
   };
 };
 
-client.initialize().catch(err => {
-  console.error('❌ Failed to initialize WhatsApp Client:', err.message);
-});
-
-export default client;
+export default whatsappClient;

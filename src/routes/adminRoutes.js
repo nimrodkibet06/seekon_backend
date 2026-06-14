@@ -44,7 +44,7 @@ import {
 } from '../controllers/couponController.js';
 import { authMiddleware, adminMiddleware } from '../middleware/auth.js';
 import Notification from '../models/Notification.js';
-import { getStatus } from '../config/whatsapp.js';
+import { getStatus, initWhatsAppClient } from '../config/whatsapp.js';
 
 const router = express.Router();
 
@@ -67,6 +67,15 @@ router.post('/login', adminLoginLimiter, adminLogin);
 router.get('/bot-status', authMiddleware, adminMiddleware, (req, res) => {
   const { connected, qr } = getStatus();
   res.status(200).json({ connected, qr });
+});
+
+router.post('/bot-status/refresh', authMiddleware, adminMiddleware, async (req, res) => {
+  try {
+    await initWhatsAppClient();
+    res.status(200).json({ success: true, message: 'WhatsApp client reinitialized successfully' });
+  } catch (error) {
+    res.status(500).json({ success: false, message: error.message });
+  }
 });
 
 router.get('/stats', authMiddleware, adminMiddleware, getAdminStats);
