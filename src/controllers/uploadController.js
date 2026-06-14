@@ -26,17 +26,33 @@ export const uploadFile = async (req, res) => {
 
     const uploadedImages = [];
 
-    // 2. Direct Sequential Cloudinary Upload (No AI, No Workers)
+    // 2. Direct Sequential Cloudinary Upload / Verification
     for (let i = 0; i < files.length; i++) {
       const file = files[i];
       try {
-        console.log(`[${i + 1}/${files.length}] Uploading direct to Cloudinary: ${file.originalname}`);
-        const result = await uploadToCloudinary(file.path, 'seekon-apparel');
-        uploadedImages.push({ url: result.url, publicId: result.public_id });
+        if (file.path && (file.path.startsWith('http://') || file.path.startsWith('https://'))) {
+          // File was streamed directly to Cloudinary by multer-storage-cloudinary
+          console.log(`[${i + 1}/${files.length}] File already uploaded directly to Cloudinary: ${file.originalname}`);
+          uploadedImages.push({ url: file.path, publicId: file.filename });
+        } else {
+          // Fallback path if it was saved locally to disk
+          console.log(`[${i + 1}/${files.length}] Uploading from disk to Cloudinary: ${file.originalname}`);
+          const result = await uploadToCloudinary(file.path, 'seekon-apparel');
+          uploadedImages.push({ url: result.url, publicId: result.public_id });
+        }
       } catch (err) {
         console.error(`Error uploading ${file.originalname}:`, err.message);
       } finally {
-        if (fs.existsSync(file.path)) fs.unlinkSync(file.path);
+        // Only attempt to unlink if it is a local file path
+        if (file.path && !file.path.startsWith('http://') && !file.path.startsWith('https://')) {
+          try {
+            if (fs.existsSync(file.path)) {
+              fs.unlinkSync(file.path);
+            }
+          } catch (cleanupError) {
+            console.warn('⚠️ Failed to cleanup temp file:', cleanupError.message);
+          }
+        }
       }
     }
 
