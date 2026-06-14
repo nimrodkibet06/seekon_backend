@@ -1,3 +1,6 @@
+[variables]
+NPM_CONFIG_LEGACY_PEER_DEPS = "true"
+
 [phases.setup]
 nixPkgs = [
   "glib",
