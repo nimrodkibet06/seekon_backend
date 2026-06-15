@@ -182,18 +182,17 @@ export const createOrder = async (req, res) => {
     }
 
     // Start Asynchronous, Non-Blocking Email and WhatsApp Pipeline
-    (async () => {
-      // 1. Dispatch Customer Order Receipt Email Immediately
-      if (userEmail) {
-        try {
-          await sendOrderConfirmationEmail(userEmail, order);
-          console.log('✅ World-class luxury order confirmation email sent to customer.');
-        } catch (emailErr) {
-          console.error('⚠️ Error sending customer order confirmation email:', emailErr.message);
-        }
-      }
+    // Each section is fully isolated so a failure in one cannot block the other
+    
+    // --- PIPELINE 1: Customer Email (fire-and-forget) ---
+    if (userEmail) {
+      sendOrderConfirmationEmail(userEmail, order)
+        .then(() => console.log('✅ Order confirmation email sent to customer.'))
+        .catch(emailErr => console.error('⚠️ Error sending customer email:', emailErr.message));
+    }
 
-      // Also send Admin Notification Email
+    // --- PIPELINE 2: Admin Email (fire-and-forget) ---
+    (async () => {
       const adminMsg = `A new order (#${order._id}) totaling KES ${order.totalAmount} has just been placed! Log into the admin dashboard to process it.`;
       try {
         let admins = [];
@@ -204,50 +203,54 @@ export const createOrder = async (req, res) => {
         const adminEmails = admins.map(a => a.email).filter(Boolean);
         await sendAdminNotification('🚨 New Order Received!', adminMsg, adminEmails);
       } catch (adminErr) {
-        console.error('⚠️ Error fetching admins or sending admin notification:', adminErr.message);
+        console.error('⚠️ Error sending admin notification email:', adminErr.message);
         try {
           await sendAdminNotification('🚨 New Order Received!', adminMsg);
         } catch (e) {}
       }
+    })().catch(e => console.error('⚠️ Admin email pipeline error:', e.message));
 
-      // 2. Non-blocking WhatsApp Pipeline
-      try {
-        const phone = order.shippingAddress?.phone || order.guestPhone;
-        if (!phone) {
-          console.log('⚠️ No phone number available for WhatsApp notification routing.');
-          return;
-        }
+    // --- PIPELINE 3: WhatsApp Notifications (fire-and-forget, fully isolated) ---
+    (async () => {
+      console.log('📱 [WA-PIPELINE] Starting WhatsApp notification pipeline...');
+      
+      const phone = order.shippingAddress?.phone || order.guestPhone;
+      if (!phone) {
+        console.log('⚠️ [WA-PIPELINE] No phone number available. Skipping WhatsApp.');
+        return;
+      }
 
-        // Clean & format the phone number
-        let formattedPhone = phone.replace(/\D/g, '');
-        if (formattedPhone.startsWith('0')) {
-          formattedPhone = '254' + formattedPhone.substring(1);
-        } else if (!formattedPhone.startsWith('254') && formattedPhone.length === 9) {
-          formattedPhone = '254' + formattedPhone;
-        }
+      // Clean & format the phone number
+      let formattedPhone = phone.replace(/\D/g, '');
+      if (formattedPhone.startsWith('0')) {
+        formattedPhone = '254' + formattedPhone.substring(1);
+      } else if (!formattedPhone.startsWith('254') && formattedPhone.length === 9) {
+        formattedPhone = '254' + formattedPhone;
+      }
 
-        console.log(`📱 Routing WhatsApp customer confirmation message directly...`);
-        const customerName = `${order.shippingAddress?.firstName || ''} ${order.shippingAddress?.lastName || ''}`.trim() || order.shippingAddress?.name || 'Customer';
-        const subtotal = order.items.reduce((sum, item) => sum + (item.price * item.quantity), 0);
-        const totalWithShipping = order.totalAmount;
-        const formattedDate = new Date(order.createdAt || Date.now()).toLocaleDateString('en-US', {
-          year: 'numeric',
-          month: 'short',
-          day: 'numeric',
-          hour: '2-digit',
-          minute: '2-digit'
-        });
+      console.log(`📱 [WA-PIPELINE] Phone: ${phone} → formatted: ${formattedPhone}`);
+      
+      const customerName = order.shippingAddress?.name || `${order.shippingAddress?.firstName || ''} ${order.shippingAddress?.lastName || ''}`.trim() || 'Customer';
+      const subtotal = order.items.reduce((sum, item) => sum + (item.price * item.quantity), 0);
+      const totalWithShipping = order.totalAmount;
+      const formattedDate = new Date(order.createdAt || Date.now()).toLocaleDateString('en-US', {
+        year: 'numeric',
+        month: 'short',
+        day: 'numeric',
+        hour: '2-digit',
+        minute: '2-digit'
+      });
 
-        const itemsList = order.items.map(item => {
-          const specs = [
-            item.size ? `Size: ${item.size}` : '',
-            item.color ? `Color: ${item.color}` : ''
-          ].filter(Boolean).join(', ');
-          const specStr = specs ? ` (${specs})` : '';
-          return `• *${item.name}* x${item.quantity}${specStr}\n  _KSh ${(item.price * item.quantity).toLocaleString()}_`;
-        }).join('\n\n');
+      const itemsList = order.items.map(item => {
+        const specs = [
+          item.size ? `Size: ${item.size}` : '',
+          item.color ? `Color: ${item.color}` : ''
+        ].filter(Boolean).join(', ');
+        const specStr = specs ? ` (${specs})` : '';
+        return `• *${item.name}* x${item.quantity}${specStr}\n  _KSh ${(item.price * item.quantity).toLocaleString()}_`;
+      }).join('\n\n');
 
-        const customerMsg = `⚜️ *SEEKON APPAREL* ⚜️
+      const customerMsg = `⚜️ *SEEKON APPAREL* ⚜️
 _Premium Order Confirmation_
 
 *Thank you for your order, ${customerName}!*
@@ -276,17 +279,26 @@ ${itemsList}
 We will notify you here once your package has been handed over to the courier with your tracking details.
 
 For support or modifications, please reply directly to this chat.`;
-        
-        let sentCustomerMsg = false;
-        try {
-          await sendSafeMessage(whatsappClient, phone, customerMsg);
-          sentCustomerMsg = true;
-        } catch (msgErr) {
-          console.error('⚠️ Failed to send WhatsApp customer confirmation:', msgErr.message);
-        }
+      
+      let sentCustomerMsg = false;
+      try {
+        console.log(`📱 [WA-PIPELINE] Sending customer message to ${formattedPhone}...`);
+        await sendSafeMessage(whatsappClient, phone, customerMsg);
+        sentCustomerMsg = true;
+        console.log(`✅ [WA-PIPELINE] Customer message delivered!`);
+      } catch (msgErr) {
+        console.error('❌ [WA-PIPELINE] Failed to send WhatsApp customer confirmation:', msgErr.message);
+        console.error('❌ [WA-PIPELINE] Full error:', msgErr.stack || msgErr);
+      }
 
+      // Admin notification via WhatsApp
+      try {
         const adminChat = await getAdminChat(whatsappClient);
-        const adminAlertMsg = `⚠️ *SEEKON BOT ALERT* ⚠️
+        
+        if (!sentCustomerMsg) {
+          console.log('❌ [WA-PIPELINE] Customer message failed. Alerting admin...');
+          
+          const adminAlertMsg = `⚠️ *SEEKON BOT ALERT* ⚠️
 _Customer WhatsApp Unreachable_
 
 • *Order ID:* \`${order._id}\`
@@ -300,27 +312,23 @@ _Customer WhatsApp Unreachable_
 🔸 *Troubleshooting:*
 Please verify if the customer number *${phone}* is active on WhatsApp, or check server logs.`;
 
-        if (!sentCustomerMsg) {
-          console.log('❌ WhatsApp customer message failed. Appending status to database and alerting admin...');
-          
-          // Append status to database (order.notes)
+          // Append status to database
           const updatedNotes = order.notes 
             ? `${order.notes}\nPending - WhatsApp Delivery Failed` 
             : 'Pending - WhatsApp Delivery Failed';
           await Order.findByIdAndUpdate(order._id, { notes: updatedNotes });
 
-          // Alert Admin WhatsApp Group Chat or fallback to direct message
           if (adminChat) {
             await adminChat.sendMessage(adminAlertMsg);
           } else {
             try {
               await sendSafeMessage(whatsappClient, 'me', adminAlertMsg);
             } catch (dmErr) {
-              console.warn('⚠️ Fallback admin alert DM to self failed:', dmErr.message);
+              console.warn('⚠️ [WA-PIPELINE] Fallback admin alert DM failed:', dmErr.message);
             }
           }
         } else {
-          console.log('✅ WhatsApp customer message sent. Routing admin summary...');
+          console.log('✅ [WA-PIPELINE] Routing admin summary...');
           const adminSummaryMsg = `👑 *SEEKON ADMIN DISPATCH* 👑
 _New Premium Order Alert_
 
@@ -349,21 +357,24 @@ ${itemsList}
 ✨ *Status:* Pending Dispatch
 Action required: Verify payment and update order status to shipped once dispatched.`;
 
-          // Structured summary to Admin WhatsApp Group Chat or fallback to direct message
           if (adminChat) {
             await adminChat.sendMessage(adminSummaryMsg);
           } else {
             try {
               await sendSafeMessage(whatsappClient, 'me', adminSummaryMsg);
             } catch (dmErr) {
-              console.warn('⚠️ Fallback admin summary DM to self failed:', dmErr.message);
+              console.warn('⚠️ [WA-PIPELINE] Fallback admin summary DM failed:', dmErr.message);
             }
           }
         }
-      } catch (waErr) {
-        console.error('⚠️ Non-blocking WhatsApp operations failed:', waErr.message);
+        console.log('✅ [WA-PIPELINE] WhatsApp pipeline completed.');
+      } catch (adminWaErr) {
+        console.error('⚠️ [WA-PIPELINE] Admin WhatsApp notification failed:', adminWaErr.message);
       }
-    })();
+    })().catch(fatalErr => {
+      console.error('🔥 [WA-PIPELINE] FATAL: Entire WhatsApp pipeline crashed:', fatalErr.message);
+      console.error('🔥 [WA-PIPELINE] Stack:', fatalErr.stack);
+    });
 
     res.status(201).json({
       success: true,
