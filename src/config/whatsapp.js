@@ -106,7 +106,6 @@ export const initWhatsAppClient = async () => {
       '--disable-speech-api',
       '--disk-cache-size=10485760',
       '--media-cache-size=10485760',
-      '--js-flags=--max-old-space-size=256',
       '--blink-settings=imagesEnabled=false'
     ]
   };
@@ -127,7 +126,8 @@ export const initWhatsAppClient = async () => {
     webVersionCache: {
       type: 'remote',
       remotePath: 'https://raw.githubusercontent.com/wppconnect-team/wa-version/main/html/{version}.html',
-    }
+    },
+    userAgent: 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/122.0.0.0 Safari/537.36'
   });
 
   client.on('qr', (qr) => {
