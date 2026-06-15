@@ -7,6 +7,7 @@ import fs from 'fs';
 let currentQR = null;
 let isConnected = false;
 let client = null;
+let isShuttingDown = false;
 
 const getExecutablePath = () => {
   if (process.env.PUPPETEER_EXECUTABLE_PATH) {
@@ -22,8 +23,24 @@ const getExecutablePath = () => {
 };
 
 const getSessionDataPath = () => {
-  // Use a clean temporary directory for the session to avoid lockfile conflicts on cloud deployments.
-  const basePath = process.env.NODE_ENV === 'production' ? '/tmp/whatsapp-session' : './whatsapp-session';
+  // Priority: env var > /data volume > local fallback
+  if (process.env.WHATSAPP_SESSION_PATH) {
+    console.log(`📂 Using WHATSAPP_SESSION_PATH from env: ${process.env.WHATSAPP_SESSION_PATH}`);
+    return process.env.WHATSAPP_SESSION_PATH;
+  }
+  // Auto-detect Railway Persistent Volume at /data
+  if (fs.existsSync('/data')) {
+    const volumePath = '/data/whatsapp-session';
+    console.log(`📂 Railway Persistent Volume detected. Using: ${volumePath}`);
+    return volumePath;
+  }
+  return './whatsapp-session';
+};
+
+/**
+ * Safely clean up session directory before init to prevent EBUSY lockfile crashes.
+ */
+const prepareSessionDir = (basePath) => {
   try {
     if (!fs.existsSync(basePath)) {
       fs.mkdirSync(basePath, { recursive: true });
@@ -38,25 +55,41 @@ const getSessionDataPath = () => {
   } catch (e) {
     console.warn('⚠️ Unable to prepare WhatsApp session directory:', e.message);
   }
-  return basePath;
+};
+
+/**
+ * Safely destroy the client, swallowing EBUSY and other shutdown errors.
+ */
+const safeDestroy = async () => {
+  if (!client) return;
+  try {
+    await client.destroy();
+  } catch (e) {
+    // EBUSY lockfile errors during destroy are expected on Windows/cloud — swallow them
+    if (e.message?.includes('EBUSY') || e.message?.includes('lockfile')) {
+      console.warn('⚠️ Ignored EBUSY lockfile error during client destroy (expected on cloud).');
+    } else {
+      console.warn('⚠️ Error destroying WhatsApp Client:', e.message);
+    }
+  }
+  client = null;
 };
 
 export const initWhatsAppClient = async () => {
   if (client) {
-    try {
-      console.log('🔄 Destroying existing WhatsApp Client instance...');
-      await client.destroy();
-    } catch (e) {
-      console.warn('⚠️ Error destroying existing WhatsApp Client:', e.message);
-    }
+    console.log('🔄 Destroying existing WhatsApp Client instance...');
+    await safeDestroy();
   }
 
   currentQR = null;
   isConnected = false;
 
+  const sessionPath = getSessionDataPath();
+  prepareSessionDir(sessionPath);
+
   const puppeteerConfig = {
     headless: true,
-    protocolTimeout: 300000, // 5 minutes (prevents protocol timeout crashes during high CPU load/syncing)
+    protocolTimeout: 300000, // 5 minutes
     args: [
       '--no-sandbox',
       '--disable-setuid-sandbox',
@@ -67,13 +100,13 @@ export const initWhatsAppClient = async () => {
       '--disable-background-networking',
       '--disable-sync',
       '--disable-translate',
-      '--mute-audio', // Mutes audio process entirely to save media resources
-      '--disable-webrtc', // Disables WebRTC to block voice/video call loads
-      '--disable-3d-apis', // Disables WebGL/3D processing
-      '--disable-speech-api', // Disables Speech Synthesis/Recognition APIs
-      '--disk-cache-size=10485760', // Limit disk cache to 10MB
-      '--media-cache-size=10485760', // Limit media cache to 10MB
-      '--js-flags="--max-old-space-size=256"', // Strict 256MB JS heap limit
+      '--mute-audio',
+      '--disable-webrtc',
+      '--disable-3d-apis',
+      '--disable-speech-api',
+      '--disk-cache-size=10485760',
+      '--media-cache-size=10485760',
+      '--js-flags=--max-old-space-size=256',
       '--blink-settings=imagesEnabled=false'
     ]
   };
@@ -84,10 +117,10 @@ export const initWhatsAppClient = async () => {
     console.log(`🔍 Forcing Puppeteer executablePath to: ${executablePath}`);
   }
 
-  console.log('📦 Initializing WhatsApp Client with aggressive Chromium throttling...');
+  console.log(`📦 Initializing WhatsApp Client (session: ${sessionPath})...`);
   client = new Client({
     authStrategy: new LocalAuth({
-      dataPath: getSessionDataPath()
+      dataPath: sessionPath
     }),
     puppeteer: puppeteerConfig,
     webVersionCache: {
@@ -104,10 +137,12 @@ export const initWhatsAppClient = async () => {
   });
 
   client.on('authenticated', () => {
+    currentQR = null; // CRITICAL: Clear QR so frontend stops showing it
     console.log('✅ WhatsApp Client Authenticated successfully!');
   });
 
   client.on('auth_failure', (msg) => {
+    currentQR = null;
     console.error('❌ WhatsApp Authentication Failure:', msg);
   });
 
@@ -121,11 +156,23 @@ export const initWhatsAppClient = async () => {
     currentQR = null;
     isConnected = false;
     console.warn('❌ WhatsApp Client Disconnected:', reason);
+
+    // Send admin alert email (non-blocking)
     try {
       await sendAdminOfflineAlertEmail();
       console.log('📧 Admin offline alert email sent successfully.');
     } catch (err) {
       console.error('⚠️ Failed to send admin offline alert email:', err.message);
+    }
+
+    // Auto-reconnect after disconnect (unless we're shutting down the process)
+    if (!isShuttingDown) {
+      console.log('🔄 Auto-reconnect: Will attempt to reinitialize in 30 seconds...');
+      setTimeout(() => {
+        if (!isShuttingDown) {
+          startWithRetry(1);
+        }
+      }, 30000);
     }
   });
 
@@ -138,15 +185,29 @@ const startWithRetry = async (attempt = 1) => {
     await initWhatsAppClient();
   } catch (err) {
     console.error(`❌ Failed to initialize WhatsApp Client (Attempt ${attempt}/3):`, err.message || err);
-    if (attempt < 3) {
-      const delay = attempt * 10000; // 10s, 20s
-      console.log(`🔄 Retrying WhatsApp client initialization in ${delay}ms...`);
+    if (attempt < 3 && !isShuttingDown) {
+      const delay = attempt * 15000; // 15s, 30s
+      console.log(`🔄 Retrying WhatsApp client initialization in ${delay / 1000}s...`);
       setTimeout(() => startWithRetry(attempt + 1), delay);
+    } else {
+      console.error('❌ WhatsApp Client initialization failed after all retries. Bot will remain offline until manual restart.');
     }
   }
 };
 
 startWithRetry();
+
+// Graceful shutdown: prevent EBUSY crashes on Railway SIGTERM / local Ctrl+C
+const gracefulShutdown = async (signal) => {
+  if (isShuttingDown) return;
+  isShuttingDown = true;
+  console.log(`\n🛑 Received ${signal}. Gracefully shutting down WhatsApp client...`);
+  await safeDestroy();
+  // Don't call process.exit() here — let the Node runtime finish naturally
+};
+
+process.on('SIGTERM', () => gracefulShutdown('SIGTERM'));
+process.on('SIGINT', () => gracefulShutdown('SIGINT'));
 
 // A wrapper object to delegate all properties/methods to the active client instance
 const whatsappClient = {
