@@ -226,26 +226,27 @@ export const createOrder = async (req, res) => {
           formattedPhone = '254' + formattedPhone;
         }
 
-        const jid = `${formattedPhone}@c.us`;
-        console.log(`🔍 Checking if WhatsApp user exists for: ${jid}`);
+        console.log(`📱 Routing WhatsApp customer confirmation message directly...`);
+        const customerMsg = `Hello ${order.shippingAddress?.name || 'Customer'}! Thank you for ordering from *Seekon*. Your order *#${order._id}* totaling KSh ${order.totalAmount.toLocaleString()} has been confirmed. We will message you here when it ships!`;
         
-        let isRegistered = false;
+        let sentCustomerMsg = false;
         try {
-          isRegistered = await whatsappClient.isRegisteredUser(jid);
-        } catch (regErr) {
-          console.error('⚠️ Error verifying WhatsApp user registration status:', regErr.message);
+          await sendSafeMessage(whatsappClient, phone, customerMsg);
+          sentCustomerMsg = true;
+        } catch (msgErr) {
+          console.error('⚠️ Failed to send WhatsApp customer confirmation:', msgErr.message);
         }
 
         const adminChat = await getAdminChat(whatsappClient);
         const adminAlertMsg = `⚠️ *URGENT BOT WARNING* ⚠️\nOrder *#${order._id}* was created, but customer WhatsApp *${phone}* is *unreachable*. Fallback email sent to *${userEmail || contactEmail}*. Check admin panel logs.`;
 
-        if (!isRegistered) {
-          console.log('❌ WhatsApp number is unreachable. Appending status to database and alerting admin...');
+        if (!sentCustomerMsg) {
+          console.log('❌ WhatsApp customer message failed. Appending status to database and alerting admin...');
           
           // Append status to database (order.notes)
           const updatedNotes = order.notes 
-            ? `${order.notes}\nPending - WhatsApp Unreachable` 
-            : 'Pending - WhatsApp Unreachable';
+            ? `${order.notes}\nPending - WhatsApp Delivery Failed` 
+            : 'Pending - WhatsApp Delivery Failed';
           await Order.findByIdAndUpdate(order._id, { notes: updatedNotes });
 
           // Alert Admin WhatsApp Group Chat or fallback to direct message
@@ -259,12 +260,7 @@ export const createOrder = async (req, res) => {
             }
           }
         } else {
-          console.log('✅ Customer WhatsApp active. Sending safe message...');
-          
-          // Send safe message to customer
-          const customerMsg = `Hello ${order.shippingAddress?.name || 'Customer'}! Thank you for ordering from *Seekon*. Your order *#${order._id}* totaling KSh ${order.totalAmount.toLocaleString()} has been confirmed. We will message you here when it ships!`;
-          await sendSafeMessage(whatsappClient, phone, customerMsg);
-
+          console.log('✅ WhatsApp customer message sent. Routing admin summary...');
           const itemsSummary = order.items.map(item => `- ${item.name} (Qty: ${item.quantity})`).join('\n');
           const adminSummaryMsg = `🛍️ *NEW ORDER RECEIVED* 🛍️\n\n*Order ID:* ${order._id}\n*Total:* KSh ${order.totalAmount.toLocaleString()}\n*Customer:* ${order.shippingAddress?.name || 'Guest'}\n*Phone:* ${phone}\n*Email:* ${userEmail || contactEmail}\n\n*Items Ordered:*\n${itemsSummary}\n\nRouted successfully.`;
 
