@@ -255,7 +255,7 @@ export const getAdminChat = async (clientInstance) => {
   return null;
 };
 
-// Safe human-mimicking messaging engine utility with built-in retry logic
+// Safe messaging utility with timeout protection and retry logic
 export const sendSafeMessage = async (clientInstance, phone, message, attempt = 1) => {
   const activeClient = client;
   if (!activeClient || !isConnected) throw new Error('WhatsApp Client is offline or not authenticated yet.');
@@ -278,41 +278,33 @@ export const sendSafeMessage = async (clientInstance, phone, message, attempt = 
       chatId = `${formatted}@c.us`;
     }
     
-    console.log(`📱 Routing message to: ${chatId} (Attempt ${attempt}/3)`);
-    
-    let chat = null;
-    try {
-      chat = await activeClient.getChatById(chatId);
-    } catch (e) {
-      console.warn(`⚠️ Could not fetch chat object for JID ${chatId}:`, e.message);
-      if (e.message.includes('context was destroyed') || e.message.includes('properties of undefined')) {
-        throw e;
-      }
-    }
+    console.log(`📱 [SEND] Routing to: ${chatId} (Attempt ${attempt}/3)`);
 
-    if (chat) {
-      try {
-        // Simulate typing
-        await chat.sendStateTyping();
-        
-        // Randomized pause (3 to 6 seconds for better responsiveness)
-        const delayMs = Math.floor(Math.random() * (6000 - 3000 + 1)) + 3000;
-        console.log(`⏳ Waiting for ${delayMs}ms to mimic human typing...`);
-        await new Promise(resolve => setTimeout(resolve, delayMs));
-      } catch (typingErr) {
-        console.warn('⚠️ Failed to simulate typing state:', typingErr.message);
-      }
-    }
+    // Timeout wrapper — prevents hanging forever if Chromium is unresponsive
+    const withTimeout = (promise, ms, label) => {
+      return Promise.race([
+        promise,
+        new Promise((_, reject) => setTimeout(() => reject(new Error(`${label} timed out after ${ms}ms`)), ms))
+      ]);
+    };
     
-    // Send message directly to JID - works for all contacts regardless of chat history
-    const response = await activeClient.sendMessage(chatId, message);
-    console.log(`✅ Message delivered successfully to target ${chatId}`);
+    // Skip typing simulation entirely — just send the message directly
+    // Typing delays waste resources and can cause timeouts on Railway
+    console.log(`📱 [SEND] Sending message directly (no typing delay)...`);
+    
+    const response = await withTimeout(
+      activeClient.sendMessage(chatId, message),
+      60000, // 60 second timeout
+      'sendMessage'
+    );
+    
+    console.log(`✅ [SEND] Message delivered successfully to ${chatId}`);
     return response;
   } catch (error) {
-    console.error(`❌ Failed to send safe message to target ${phone} on attempt ${attempt}:`, error.message);
+    console.error(`❌ [SEND] Failed on attempt ${attempt}: ${error.message}`);
     if (attempt < 3) {
       const waitTime = attempt * 5000; // 5s, 10s
-      console.log(`🔄 Retrying in ${waitTime}ms...`);
+      console.log(`🔄 [SEND] Retrying in ${waitTime / 1000}s...`);
       await new Promise(resolve => setTimeout(resolve, waitTime));
       return sendSafeMessage(clientInstance, phone, message, attempt + 1);
     }
