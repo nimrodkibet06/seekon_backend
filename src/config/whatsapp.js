@@ -129,19 +129,19 @@ initWhatsAppClient().catch(err => {
 // A wrapper object to delegate all properties/methods to the active client instance
 const whatsappClient = {
   isRegisteredUser(...args) {
-    if (!client) throw new Error('WhatsApp Client not initialized');
+    if (!client || !isConnected) throw new Error('WhatsApp Client is offline or not authenticated yet.');
     return client.isRegisteredUser(...args);
   },
   getChatById(...args) {
-    if (!client) throw new Error('WhatsApp Client not initialized');
+    if (!client || !isConnected) throw new Error('WhatsApp Client is offline or not authenticated yet.');
     return client.getChatById(...args);
   },
   getChats(...args) {
-    if (!client) throw new Error('WhatsApp Client not initialized');
+    if (!client || !isConnected) throw new Error('WhatsApp Client is offline or not authenticated yet.');
     return client.getChats(...args);
   },
   sendMessage(...args) {
-    if (!client) throw new Error('WhatsApp Client not initialized');
+    if (!client || !isConnected) throw new Error('WhatsApp Client is offline or not authenticated yet.');
     return client.sendMessage(...args);
   }
 };
@@ -149,7 +149,7 @@ const whatsappClient = {
 // Helper to get Admin Group Chat or fallback
 export const getAdminChat = async (clientInstance) => {
   const activeClient = client;
-  if (!activeClient) return null;
+  if (!activeClient || !isConnected) return null;
   
   if (process.env.ADMIN_WHATSAPP_GROUP_ID) {
     try {
@@ -175,7 +175,7 @@ export const getAdminChat = async (clientInstance) => {
 // Safe human-mimicking messaging engine utility
 export const sendSafeMessage = async (clientInstance, phone, message) => {
   const activeClient = client;
-  if (!activeClient) throw new Error('WhatsApp Client not initialized');
+  if (!activeClient || !isConnected) throw new Error('WhatsApp Client is offline or not authenticated yet.');
   
   const targetPhone = '0791359930';
   let finalMessage = message;
