@@ -22,12 +22,23 @@ const getExecutablePath = () => {
 };
 
 const getSessionDataPath = () => {
-  // Auto-detect if a Railway Persistent Volume is mounted at /data
-  if (fs.existsSync('/data')) {
-    console.log('📂 Railway Persistent Volume detected at /data. Storing session persistently.');
-    return '/data/whatsapp-session';
+  // Use a clean temporary directory for the session to avoid lockfile conflicts on cloud deployments.
+  const basePath = process.env.NODE_ENV === 'production' ? '/tmp/whatsapp-session' : './whatsapp-session';
+  try {
+    if (!fs.existsSync(basePath)) {
+      fs.mkdirSync(basePath, { recursive: true });
+      console.log(`📂 Created WhatsApp session directory at ${basePath}`);
+    }
+    // Remove stale lockfile if present (prevents EBUSY on shutdown/startup)
+    const lockFile = `${basePath}/session/lockfile`;
+    if (fs.existsSync(lockFile)) {
+      fs.unlinkSync(lockFile);
+      console.log('🗑️ Removed stale WhatsApp lockfile');
+    }
+  } catch (e) {
+    console.warn('⚠️ Unable to prepare WhatsApp session directory:', e.message);
   }
-  return './whatsapp-session';
+  return basePath;
 };
 
 export const initWhatsAppClient = async () => {
