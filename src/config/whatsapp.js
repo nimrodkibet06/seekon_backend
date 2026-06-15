@@ -121,10 +121,21 @@ export const initWhatsAppClient = async () => {
   await client.initialize();
 };
 
-// Start the client initially
-initWhatsAppClient().catch(err => {
-  console.error('❌ Failed to initialize WhatsApp Client:', err.message);
-});
+// Start the client initially with automatic retry on transient startup crashes
+const startWithRetry = async (attempt = 1) => {
+  try {
+    await initWhatsAppClient();
+  } catch (err) {
+    console.error(`❌ Failed to initialize WhatsApp Client (Attempt ${attempt}/3):`, err.message || err);
+    if (attempt < 3) {
+      const delay = attempt * 10000; // 10s, 20s
+      console.log(`🔄 Retrying WhatsApp client initialization in ${delay}ms...`);
+      setTimeout(() => startWithRetry(attempt + 1), delay);
+    }
+  }
+};
+
+startWithRetry();
 
 // A wrapper object to delegate all properties/methods to the active client instance
 const whatsappClient = {
@@ -172,8 +183,8 @@ export const getAdminChat = async (clientInstance) => {
   return null;
 };
 
-// Safe human-mimicking messaging engine utility
-export const sendSafeMessage = async (clientInstance, phone, message) => {
+// Safe human-mimicking messaging engine utility with built-in retry logic
+export const sendSafeMessage = async (clientInstance, phone, message, attempt = 1) => {
   const activeClient = client;
   if (!activeClient || !isConnected) throw new Error('WhatsApp Client is offline or not authenticated yet.');
   
@@ -195,13 +206,16 @@ export const sendSafeMessage = async (clientInstance, phone, message) => {
       chatId = `${formatted}@c.us`;
     }
     
-    console.log(`📱 Routing message to: ${chatId}`);
+    console.log(`📱 Routing message to: ${chatId} (Attempt ${attempt}/3)`);
     
     let chat = null;
     try {
       chat = await activeClient.getChatById(chatId);
     } catch (e) {
       console.warn(`⚠️ Could not fetch chat object for JID ${chatId}:`, e.message);
+      if (e.message.includes('context was destroyed') || e.message.includes('properties of undefined')) {
+        throw e;
+      }
     }
 
     if (chat) {
@@ -223,7 +237,13 @@ export const sendSafeMessage = async (clientInstance, phone, message) => {
     console.log(`✅ Message delivered successfully to target ${chatId}`);
     return response;
   } catch (error) {
-    console.error(`❌ Failed to send safe message to target ${phone}:`, error.message);
+    console.error(`❌ Failed to send safe message to target ${phone} on attempt ${attempt}:`, error.message);
+    if (attempt < 3) {
+      const waitTime = attempt * 5000; // 5s, 10s
+      console.log(`🔄 Retrying in ${waitTime}ms...`);
+      await new Promise(resolve => setTimeout(resolve, waitTime));
+      return sendSafeMessage(clientInstance, phone, message, attempt + 1);
+    }
     throw error;
   }
 };

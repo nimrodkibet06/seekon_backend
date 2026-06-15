@@ -148,10 +148,10 @@ export const createOrder = async (req, res) => {
       contactEmail,
       userEmail,
       items: orderItems,
-      totalAmount: calculatedTotal,
+      totalAmount: calculatedTotal + (shippingPrice || 0),
       paymentMethod: normalizedPaymentMethod,
       shippingAddress: mappedShippingAddress,
-      deliveryDate,
+      deliveryDate: deliveryDate,
       convenientTime,
       shippingPrice: shippingPrice || 0,
       shippingMethod: shippingMethod || '',
@@ -227,7 +227,55 @@ export const createOrder = async (req, res) => {
         }
 
         console.log(`📱 Routing WhatsApp customer confirmation message directly...`);
-        const customerMsg = `Hello ${order.shippingAddress?.name || 'Customer'}! Thank you for ordering from *Seekon*. Your order *#${order._id}* totaling KSh ${order.totalAmount.toLocaleString()} has been confirmed. We will message you here when it ships!`;
+        const customerName = `${order.shippingAddress?.firstName || ''} ${order.shippingAddress?.lastName || ''}`.trim() || order.shippingAddress?.name || 'Customer';
+        const subtotal = order.items.reduce((sum, item) => sum + (item.price * item.quantity), 0);
+        const totalWithShipping = order.totalAmount;
+        const formattedDate = new Date(order.createdAt || Date.now()).toLocaleDateString('en-US', {
+          year: 'numeric',
+          month: 'short',
+          day: 'numeric',
+          hour: '2-digit',
+          minute: '2-digit'
+        });
+
+        const itemsList = order.items.map(item => {
+          const specs = [
+            item.size ? `Size: ${item.size}` : '',
+            item.color ? `Color: ${item.color}` : ''
+          ].filter(Boolean).join(', ');
+          const specStr = specs ? ` (${specs})` : '';
+          return `• *${item.name}* x${item.quantity}${specStr}\n  _KSh ${(item.price * item.quantity).toLocaleString()}_`;
+        }).join('\n\n');
+
+        const customerMsg = `⚜️ *SEEKON APPAREL* ⚜️
+_Premium Order Confirmation_
+
+*Thank you for your order, ${customerName}!*
+Your order has been received and is being prepared for dispatch.
+
+🔸 *ORDER DETAILS*
+• *Order ID:* \`${order._id}\`
+• *Date:* ${formattedDate}
+• *Payment:* ${order.paymentMethod || 'M-Pesa'}
+
+🔸 *ITEMS ORDERED*
+${itemsList}
+
+🔸 *SHIPPING & DELIVERY*
+• *Recipient:* ${customerName}
+• *Phone:* ${phone}
+• *Address:* ${order.shippingAddress?.address || 'N/A'}
+• *Method:* ${order.shippingMethod || 'Standard'}
+
+🔸 *TOTAL AMOUNT*
+• *Subtotal:* KSh ${subtotal.toLocaleString()}
+• *Shipping:* KSh ${(order.shippingPrice || 0).toLocaleString()}
+• *Total Paid:* *KSh ${totalWithShipping.toLocaleString()}* 👑
+
+✨ *What's Next?*
+We will notify you here once your package has been handed over to the courier with your tracking details.
+
+For support or modifications, please reply directly to this chat.`;
         
         let sentCustomerMsg = false;
         try {
@@ -238,7 +286,19 @@ export const createOrder = async (req, res) => {
         }
 
         const adminChat = await getAdminChat(whatsappClient);
-        const adminAlertMsg = `⚠️ *URGENT BOT WARNING* ⚠️\nOrder *#${order._id}* was created, but customer WhatsApp *${phone}* is *unreachable*. Fallback email sent to *${userEmail || contactEmail}*. Check admin panel logs.`;
+        const adminAlertMsg = `⚠️ *SEEKON BOT ALERT* ⚠️
+_Customer WhatsApp Unreachable_
+
+• *Order ID:* \`${order._id}\`
+• *Customer:* ${customerName}
+• *Phone:* ${phone}
+
+🔸 *Action Taken:*
+- Fallback confirmation email sent to *${userEmail || contactEmail}*.
+- Order status marked with pending alerts.
+
+🔸 *Troubleshooting:*
+Please verify if the customer number *${phone}* is active on WhatsApp, or check server logs.`;
 
         if (!sentCustomerMsg) {
           console.log('❌ WhatsApp customer message failed. Appending status to database and alerting admin...');
@@ -261,8 +321,33 @@ export const createOrder = async (req, res) => {
           }
         } else {
           console.log('✅ WhatsApp customer message sent. Routing admin summary...');
-          const itemsSummary = order.items.map(item => `- ${item.name} (Qty: ${item.quantity})`).join('\n');
-          const adminSummaryMsg = `🛍️ *NEW ORDER RECEIVED* 🛍️\n\n*Order ID:* ${order._id}\n*Total:* KSh ${order.totalAmount.toLocaleString()}\n*Customer:* ${order.shippingAddress?.name || 'Guest'}\n*Phone:* ${phone}\n*Email:* ${userEmail || contactEmail}\n\n*Items Ordered:*\n${itemsSummary}\n\nRouted successfully.`;
+          const adminSummaryMsg = `👑 *SEEKON ADMIN DISPATCH* 👑
+_New Premium Order Alert_
+
+🔸 *ORDER INFO*
+• *Order ID:* \`${order._id}\`
+• *Date:* ${formattedDate}
+• *Payment:* ${order.paymentMethod || 'M-Pesa'}
+
+🔸 *CUSTOMER DETAILS*
+• *Name:* ${customerName}
+• *Email:* ${userEmail || contactEmail}
+• *Phone:* ${phone}
+
+🔸 *SHIPPING INFO*
+• *Address:* ${order.shippingAddress?.address || 'N/A'}
+• *Method:* ${order.shippingMethod || 'Standard'}
+
+🔸 *ITEMS ORDERED*
+${itemsList}
+
+🔸 *FINANCIALS*
+• *Subtotal:* KSh ${subtotal.toLocaleString()}
+• *Shipping:* KSh ${(order.shippingPrice || 0).toLocaleString()}
+• *Total Amount:* *KSh ${totalWithShipping.toLocaleString()}* 💰
+
+✨ *Status:* Pending Dispatch
+Action required: Verify payment and update order status to shipped once dispatched.`;
 
           // Structured summary to Admin WhatsApp Group Chat or fallback to direct message
           if (adminChat) {
@@ -350,16 +435,11 @@ export const getMyOrders = async (req, res) => {
       });
     }
 
-    // Return orders where user matches and hiddenByUser is false (or not set)
-    // Only fetch paid/completed orders - exclude pending/unpaid checkouts
+    // Return all orders where user matches and hiddenByUser is false (or not set)
     const query = { 
       user: userId,
-      isPaid: true,
       hiddenByUser: { $ne: true }
     };
-
-    // still filter out common noise
-    query.status = { $nin: ['pending', 'cancelled'] };
 
     const orders = await Order.find(query)
       .populate('items.product')

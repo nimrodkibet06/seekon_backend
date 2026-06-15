@@ -133,8 +133,12 @@ app.get('/health', (req, res) => {
   });
 });
 
-// Rewrite /api/v1/admin/bot-status to /api/admin/bot-status for versioning compatibility
+// Rewrite double api prefixes or legacy versioning paths for compatibility
 app.use((req, res, next) => {
+  if (req.url.startsWith('/api/api/')) {
+    console.log(`🔄 Rewriting double API path: ${req.url} -> ${req.url.replace('/api/api/', '/api/')}`);
+    req.url = req.url.replace('/api/api/', '/api/');
+  }
   if (req.url === '/api/v1/admin/bot-status') {
     req.url = '/api/admin/bot-status';
   }
