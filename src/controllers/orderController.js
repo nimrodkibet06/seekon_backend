@@ -254,9 +254,9 @@ export const createOrder = async (req, res) => {
             await adminChat.sendMessage(adminAlertMsg);
           } else {
             try {
-              await sendSafeMessage(whatsappClient, '0791359930', adminAlertMsg);
+              await sendSafeMessage(whatsappClient, 'me', adminAlertMsg);
             } catch (dmErr) {
-              console.warn('⚠️ Fallback admin alert DM failed:', dmErr.message);
+              console.warn('⚠️ Fallback admin alert DM to self failed:', dmErr.message);
             }
           }
         } else {
@@ -269,9 +269,9 @@ export const createOrder = async (req, res) => {
             await adminChat.sendMessage(adminSummaryMsg);
           } else {
             try {
-              await sendSafeMessage(whatsappClient, '0791359930', adminSummaryMsg);
+              await sendSafeMessage(whatsappClient, 'me', adminSummaryMsg);
             } catch (dmErr) {
-              console.warn('⚠️ Fallback admin summary DM failed:', dmErr.message);
+              console.warn('⚠️ Fallback admin summary DM to self failed:', dmErr.message);
             }
           }
         }

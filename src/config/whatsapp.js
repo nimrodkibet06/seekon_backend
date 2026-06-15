@@ -177,24 +177,25 @@ export const sendSafeMessage = async (clientInstance, phone, message) => {
   const activeClient = client;
   if (!activeClient || !isConnected) throw new Error('WhatsApp Client is offline or not authenticated yet.');
   
-  const targetPhone = '0791359930';
-  let finalMessage = message;
-  
-  if (phone && phone !== targetPhone) {
-    finalMessage = `${message}\n\n[Original Recipient: ${phone}]`;
-  }
-  
   try {
-    // Format phone to JID
-    let formatted = targetPhone.replace(/\D/g, '');
-    if (formatted.startsWith('0')) {
-      formatted = '254' + formatted.substring(1);
-    } else if (!formatted.startsWith('254') && formatted.length === 9) {
-      formatted = '254' + formatted;
+    let chatId;
+    if (phone === 'me' || phone === 'self') {
+      if (activeClient.info && activeClient.info.wid) {
+        chatId = activeClient.info.wid._serialized;
+      } else {
+        throw new Error('Client info not loaded yet - cannot message self');
+      }
+    } else {
+      let formatted = phone.replace(/\D/g, '');
+      if (formatted.startsWith('0')) {
+        formatted = '254' + formatted.substring(1);
+      } else if (!formatted.startsWith('254') && formatted.length === 9) {
+        formatted = '254' + formatted;
+      }
+      chatId = `${formatted}@c.us`;
     }
     
-    const chatId = `${formatted}@c.us`;
-    console.log(`📱 Routing message to: ${chatId} (Redirected from ${phone})`);
+    console.log(`📱 Routing message to: ${chatId}`);
     
     let chat = null;
     try {
@@ -218,11 +219,11 @@ export const sendSafeMessage = async (clientInstance, phone, message) => {
     }
     
     // Send message directly to JID - works for all contacts regardless of chat history
-    const response = await activeClient.sendMessage(chatId, finalMessage);
-    console.log(`✅ Message delivered successfully to override target ${targetPhone} (Original: ${phone})`);
+    const response = await activeClient.sendMessage(chatId, message);
+    console.log(`✅ Message delivered successfully to target ${chatId}`);
     return response;
   } catch (error) {
-    console.error(`❌ Failed to send safe message to override target ${targetPhone} (Original: ${phone}):`, error.message);
+    console.error(`❌ Failed to send safe message to target ${phone}:`, error.message);
     throw error;
   }
 };
