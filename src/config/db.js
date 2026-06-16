@@ -2,11 +2,11 @@ import mongoose from 'mongoose';
 
 export const connectDB = async () => {
   // ✅ FAIL-SAFE CHECK: Verify MONGO_URI is defined before connecting
-  const mongoUri = process.env.MONGO_URI;
+  const mongoUri = process.env.MONGO_URI || process.env.DATABASE_URL;
   
   if (!mongoUri) {
-    console.error('❌ Error: MONGO_URI environment variable is not defined!');
-    console.error('📝 Please set MONGO_URI in your .env file or Railway environment variables.');
+    console.error('❌ Error: Neither MONGO_URI nor DATABASE_URL environment variable is defined!');
+    console.error('📝 Please set MONGO_URI or DATABASE_URL in your .env file or environment variables.');
     process.exit(1);
   }
 

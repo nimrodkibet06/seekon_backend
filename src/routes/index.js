@@ -12,6 +12,7 @@ import aiRoutes from './aiRoutes.js';
 import couponRoutes from './couponRoutes.js';
 import brandRoutes from './brandRoutes.js';
 import categoryRoutes from './categoryRoutes.js';
+import toolRoutes from './toolRoutes.js';
 
 const router = express.Router();
 
@@ -29,5 +30,6 @@ router.use('/ai', aiRoutes);
 router.use('/coupons', couponRoutes);
 router.use('/brands', brandRoutes);
 router.use('/categories', categoryRoutes);
+router.use('/tools', toolRoutes);
 
 export default router;

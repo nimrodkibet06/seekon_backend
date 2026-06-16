@@ -47,7 +47,7 @@ export const validateEnv = () => {
   
   // Check CRITICAL variables
   CRITICAL_VARS.forEach(({ key, name, description }) => {
-    const value = process.env[key];
+    const value = key === 'MONGO_URI' ? (process.env.MONGO_URI || process.env.DATABASE_URL) : process.env[key];
     if (value) {
       envStatus.critical.push({ key, name, value: '***configured***' });
       console.log(`✅ ${name}`);
@@ -77,7 +77,7 @@ export const validateEnv = () => {
   // Handle missing critical variables
   if (hasCriticalMissing) {
     console.error('❌ CRITICAL: Missing required environment variables!');
-    console.error('📝 Please set the above missing variables in Railway Environment Variables.\n');
+    console.error('📝 Please set the above missing variables in your environment config.\n');
     return false;
   }
   
@@ -109,6 +109,10 @@ export const isServiceConfigured = (serviceName) => {
   
   const keys = serviceKeys[serviceName];
   if (!keys) return false;
+  
+  if (serviceName === 'mongodb') {
+    return !!(process.env.MONGO_URI || process.env.DATABASE_URL);
+  }
   
   return keys.every(key => process.env[key]);
 };

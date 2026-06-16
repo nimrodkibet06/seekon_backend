@@ -52,6 +52,7 @@ const allowedOrigins = [
   'http://localhost:5173',
   'http://localhost:5177',
   'http://localhost:3000',
+  'http://4.224.81.245',
   frontendUrl,
 ].filter(Boolean);
 
