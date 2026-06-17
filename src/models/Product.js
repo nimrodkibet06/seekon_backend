@@ -24,11 +24,17 @@ const productSchema = new mongoose.Schema({
   },
   image: {
     type: String,
-    required: true
+    required: false,
+    default: ''
   },
   images: [{
     type: String
   }],
+  status: {
+    type: String,
+    enum: ['processing', 'active', 'inactive'],
+    default: 'active'
+  },
   category: {
     type: String,
     required: [true, 'Please select category'],

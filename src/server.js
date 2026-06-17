@@ -19,6 +19,7 @@ import { validateEnv } from './config/checkEnv.js';
 import { connectDB } from './config/db.js';
 import { initBackupService } from './services/backupService.js';
 import { initMpesaSyncCron } from './scripts/stkQueryCron.js';
+import './services/imageWorker.js';
 import routes from './routes/index.js';
 import settingRoutes from './routes/settingRoutes.js';
 import path from 'path';

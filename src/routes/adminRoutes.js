@@ -45,6 +45,7 @@ import {
 import { authMiddleware, adminMiddleware } from '../middleware/auth.js';
 import Notification from '../models/Notification.js';
 import { getStatus, initWhatsAppClient } from '../config/whatsapp.js';
+import { uploadQueueMultiple } from '../middleware/queueUpload.js';
 
 const router = express.Router();
 
@@ -186,7 +187,7 @@ router.put('/users/:id/reactivate', authMiddleware, adminMiddleware, reactivateU
 // Product management
 router.get('/products', authMiddleware, adminMiddleware, getAllProducts);
 router.get('/products/:id', authMiddleware, adminMiddleware, getProduct);
-router.post('/products', authMiddleware, adminMiddleware, createProduct);
+router.post('/products', authMiddleware, adminMiddleware, uploadQueueMultiple, createProduct);
 router.put('/products/:id', authMiddleware, adminMiddleware, updateProduct);
 router.delete('/products/:id', authMiddleware, adminMiddleware, deleteProduct);
 

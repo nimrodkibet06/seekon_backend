@@ -1,6 +1,25 @@
 import Product from '../models/Product.js';
 import SystemLog from '../models/SystemLog.js';
 import Order from '../models/Order.js';
+import { imageQueue } from '../queues/imageQueue.js';
+
+// Safe parser helper for arrays in multipart/form-data
+const parseArray = (field) => {
+  if (!field) return [];
+  if (Array.isArray(field)) return field;
+  if (typeof field === 'string') {
+    if (field.startsWith('[') && field.endsWith(']')) {
+      try {
+        const parsed = JSON.parse(field);
+        if (Array.isArray(parsed)) return parsed;
+      } catch (e) {
+        // Fall back
+      }
+    }
+    return field.split(',').map(item => item.trim()).filter(Boolean);
+  }
+  return [];
+};
 
 // Helper function to calculate active price based on flash sale timing
 const calculateActivePrice = (product) => {
@@ -52,6 +71,12 @@ export const getAllProducts = async (req, res) => {
     const { page = 1, limit = 50, search, category, inStock } = req.query;
 
     const query = {};
+    
+    // Non-admin requests should filter out products that are still in processing state
+    const isAdminRequest = req.originalUrl && req.originalUrl.includes('/admin');
+    if (!isAdminRequest) {
+      query.status = { $ne: 'processing' };
+    }
     
     if (search) {
       query.$or = [
@@ -124,7 +149,26 @@ export const getProduct = async (req, res) => {
 // Create Product
 export const createProduct = async (req, res) => {
   try {
-    const product = await Product.create(req.body);
+    const imageFiles = req.files || [];
+    const imagePaths = imageFiles.map(file => file.path);
+
+    // Parse array fields correctly from multipart/form-data
+    const sizes = parseArray(req.body.sizes);
+    const colors = parseArray(req.body.colors);
+    const tags = parseArray(req.body.tags);
+
+    // Set initial processing state for product creation
+    const productData = {
+      ...req.body,
+      sizes,
+      colors,
+      tags,
+      image: '',
+      images: [],
+      status: imagePaths.length > 0 ? 'processing' : 'active'
+    };
+
+    const product = await Product.create(productData);
 
     // Log action - with error handling to prevent crashes
     try {
@@ -140,9 +184,21 @@ export const createProduct = async (req, res) => {
       // Continue without crashing - product was created successfully
     }
 
-    res.status(201).json({
+    // Dispatch job to image queue if images are present
+    if (imagePaths.length > 0) {
+      const runBgRemoval = req.body.runAIBackgroundRemoval === 'true' || req.body.runAIBackgroundRemoval === true;
+      await imageQueue.add('processImages', {
+        productId: product._id.toString(),
+        imagePaths,
+        runAIBackgroundRemoval: runBgRemoval
+      });
+      console.log(`📦 [QUEUE] Image processing job added for product ${product._id} (AI Bg Removal: ${runBgRemoval})`);
+    }
+
+    // Respond to frontend immediately to allow the user to continue
+    res.status(200).json({
       success: true,
-      message: 'Product created successfully',
+      message: 'Upload received. You can continue while the images are being processed.',
       product
     });
   } catch (error) {
@@ -557,6 +613,49 @@ export const getBestSellers = async (req, res) => {
     res.status(500).json({
       success: false,
       message: 'Failed to fetch best sellers'
+    });
+  }
+};
+
+// Get processing uploads progress
+export const getProcessingUploads = async (req, res) => {
+  try {
+    const jobs = await imageQueue.getJobs(['active', 'waiting', 'delayed', 'paused', 'failed']);
+    const processingProducts = [];
+    
+    for (const job of jobs) {
+      if (job.data && job.data.productId) {
+        let productName = 'Unknown Product';
+        try {
+          const product = await Product.findById(job.data.productId).select('name');
+          if (product) productName = product.name;
+        } catch (e) {
+          // Ignore DB fetch errors
+        }
+        
+        processingProducts.push({
+          jobId: job.id,
+          productId: job.data.productId,
+          productName,
+          totalImages: job.data.imagePaths ? job.data.imagePaths.length : 0,
+          progress: job.progress || 0,
+          status: await job.getState(),
+          failedReason: job.failedReason,
+          createdAt: new Date(job.timestamp)
+        });
+      }
+    }
+    
+    res.status(200).json({
+      success: true,
+      processingCount: processingProducts.length,
+      jobs: processingProducts
+    });
+  } catch (error) {
+    console.error('Error fetching processing progress:', error);
+    res.status(500).json({
+      success: false,
+      message: 'Failed to fetch processing progress'
     });
   }
 };
