@@ -534,6 +534,7 @@ export const getOrder = async (req, res) => {
 export const updateOrderStatus = async (req, res) => {
   try {
     const { status, expectedArrival, deliveryDetails } = req.body;
+    console.log("🔥 Destructured update data -> status:", status, "expectedArrival:", expectedArrival, "deliveryDetails:", deliveryDetails);
 
     // Force the incoming status to lowercase
     const newStatus = status ? status.toLowerCase() : null;
@@ -552,11 +553,16 @@ export const updateOrderStatus = async (req, res) => {
     ).populate('user', 'name email phone');
 
     if (!order) {
+      console.log("❌ Order not found in database for ID:", req.params.id);
       return res.status(404).json({
         success: false,
         message: 'Order not found'
       });
     }
+
+    console.log("🔥 Order updated in DB. Status:", order.status, "expectedArrival:", order.expectedArrival, "deliveryDetails:", order.deliveryDetails);
+    console.log("🔥 Customer details: contactEmail:", order.contactEmail, "userEmail:", order.userEmail, "user.email:", order.user?.email);
+    console.log("🔥 Customer phone details: shippingAddress.phone:", order.shippingAddress?.phone, "guestPhone:", order.guestPhone, "user.phone:", order.user?.phone);
 
     // Log action
     await SystemLog.create({
