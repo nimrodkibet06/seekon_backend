@@ -1,3 +1,0 @@
-Backend redeploy marker file.
-
-Triggered redeploy at: 2026-06-17T11:06:07+03:00 (for CORS fix)
