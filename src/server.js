@@ -195,7 +195,7 @@ const startServer = async () => {
       const isProduction = process.env.NODE_ENV === 'production';
       console.log(`🚀 Server running on port ${PORT}`);
       console.log(`📍 Environment: ${process.env.NODE_ENV}`);
-      console.log(`✅ API URL: ${isProduction ? 'https://seekonbackend-production-da47.up.railway.app' : 'http://localhost:' + PORT}`);
+      console.log(`✅ API URL: ${isProduction ? 'https://api.seekonapparelglobal.com' : 'http://localhost:' + PORT}`);
     });
     
   } catch (error) {
