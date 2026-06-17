@@ -58,7 +58,21 @@ const allowedOrigins = [
 
 const corsOptions = {
   origin(origin, callback) {
-    if (!origin || allowedOrigins.indexOf(origin) !== -1) {
+    if (!origin) {
+      return callback(null, true);
+    }
+    
+    const originClean = origin.trim().toLowerCase();
+    
+    // Check if origin matches any whitelisted origin or domain patterns
+    const isAllowed = 
+      allowedOrigins.includes(originClean) ||
+      /^https?:\/\/localhost(:\d+)?$/.test(originClean) ||
+      /^https:\/\/([a-z0-9-]+\.)*seekonapparelglobal\.com$/.test(originClean) ||
+      /^https:\/\/([a-z0-9-]+\.)*seekon-apparel\.vercel\.app$/.test(originClean) ||
+      /^https:\/\/([a-z0-9-]+\.)*vercel\.app$/.test(originClean);
+      
+    if (isAllowed) {
       callback(null, true);
     } else {
       console.warn(`CORS blocked origin: ${origin}`);
@@ -68,6 +82,7 @@ const corsOptions = {
   credentials: true,
   methods: ['GET', 'POST', 'PUT', 'DELETE', 'PATCH', 'OPTIONS'],
   allowedHeaders: ['Content-Type', 'Authorization', 'X-Requested-With', 'Accept', 'Origin'],
+  optionsSuccessStatus: 204
 };
 
 // Handle preflight before other middleware
