@@ -575,6 +575,62 @@ export const updateOrderStatus = async (req, res) => {
       );
     }
 
+    // --- WHATSAPP PIPELINE ON UPDATE (fire-and-forget, fully isolated) ---
+    (async () => {
+      const phone = order.shippingAddress?.phone || order.guestPhone || order.user?.phone;
+      if (!phone) {
+        console.log('⚠️ [WA-UPDATE-PIPELINE] No phone number available. Skipping WhatsApp.');
+        return;
+      }
+
+      // Clean & format the phone number
+      let formattedPhone = phone.replace(/\D/g, '');
+      if (formattedPhone.startsWith('0')) {
+        formattedPhone = '254' + formattedPhone.substring(1);
+      } else if (!formattedPhone.startsWith('254') && formattedPhone.length === 9) {
+        formattedPhone = '254' + formattedPhone;
+      }
+
+      const customerName = order.shippingAddress?.name || order.user?.name || 'Customer';
+      const displayStatus = order.status ? (order.status.charAt(0).toUpperCase() + order.status.slice(1).toLowerCase()) : 'Updated';
+      
+      let updateDetails = '';
+      if (expectedArrival) {
+        updateDetails += `• *Expected Arrival:* ${expectedArrival}\n`;
+      } else if (order.expectedArrival) {
+        updateDetails += `• *Expected Arrival:* ${order.expectedArrival}\n`;
+      }
+      
+      if (deliveryDetails) {
+        updateDetails += `• *Courier Info / Note:* ${deliveryDetails}\n`;
+      } else if (order.deliveryDetails) {
+        updateDetails += `• *Courier Info / Note:* ${order.deliveryDetails}\n`;
+      }
+
+      const customerMsg = `🚚 *SEEKON ORDER UPDATE* 🚚
+Hi ${customerName},
+
+Your order status has been updated.
+
+🔸 *ORDER INFO*
+• *Order ID:* #${(order._id || order.id)?.toString().slice(-8).toUpperCase()}
+• *Status:* *${displayStatus}*
+${updateDetails}
+✨ Thank you for shopping with Seekon Apparel!
+
+For any questions, feel free to reply directly to this chat.`;
+
+      try {
+        console.log(`📱 [WA-UPDATE-PIPELINE] Sending order update WhatsApp to ${formattedPhone}...`);
+        await sendSafeMessage(whatsappClient, phone, customerMsg);
+        console.log(`✅ [WA-UPDATE-PIPELINE] Order update WhatsApp message delivered!`);
+      } catch (msgErr) {
+        console.error('❌ [WA-UPDATE-PIPELINE] Failed to send WhatsApp order update notification:', msgErr.message);
+      }
+    })().catch(fatalErr => {
+      console.error('🔥 [WA-UPDATE-PIPELINE] FATAL: Entire WhatsApp update pipeline crashed:', fatalErr.message);
+    });
+
     res.status(200).json({
       success: true,
       message: 'Order status updated',
