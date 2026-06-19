@@ -5,7 +5,7 @@ module.exports = {
       script: 'src/server.js',
       node_args: '--expose-gc',
       cron_restart: '0 0 * * 0', // Restart every Sunday at 12:00 AM
-      max_memory_restart: '350M', // Safe auto-restart if memory leaks occur
+      max_memory_restart: '500M', // Safe auto-restart threshold (raised to 500MB for background remover headroom)
       instances: 1,
       autorestart: true,
       watch: false,
