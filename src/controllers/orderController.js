@@ -21,33 +21,8 @@ const isEmailDisposable = async (email) => {
     return true;
   }
 
-  // TIER 2: Live API Check (Abstract API)
-  // Strict Fail-Safe: If API fails or key is missing, return false to let user through
-  try {
-    const apiKey = process.env.ABSTRACT_EMAIL_API_KEY;
-    if (!apiKey || apiKey === 'your_abstract_api_key') {
-      console.warn('⚠️ ABSTRACT_EMAIL_API_KEY is missing or using placeholder. Skipping Tier 2 email check.');
-      return false;
-    }
-
-    const response = await axios.get(`https://emailvalidation.abstractapi.com/v1/?api_key=${apiKey}&email=${email}`, {
-      timeout: 2000 // Strict 2 second timeout
-    });
-
-    if (response.data?.is_disposable_email?.value === true) {
-      console.log(`🚫 Blocked disposable email via Abstract API (Order): ${email}`);
-      return true;
-    }
-
-    return false;
-  } catch (error) {
-    if (error.response?.status === 401) {
-      console.error('❌ Abstract API 401 Unauthorized: Your API key is invalid or has expired. Please check ABSTRACT_EMAIL_API_KEY in .env');
-    } else {
-      console.error('❌ Tier 2 Email Check Error (Order):', error.message);
-    }
-    return false; // Fail-safe: allow order if API is down or unauthorized
-  }
+  // TIER 2: Live API Check (Abstract API) -> Disabled at user request (Resend is working flawlessly)
+  return false;
 };
 import { sendPushNotificationToAdmins } from '../routes/notificationRoutes.js';
 import { sendOrderConfirmationEmail, sendOrderStatusUpdateEmail, sendAdminNotification } from '../utils/email.js';

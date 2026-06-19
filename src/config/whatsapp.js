@@ -108,6 +108,8 @@ export const initWhatsAppClient = async () => {
       '--disable-webrtc',
       '--disable-3d-apis',
       '--disable-speech-api',
+      '--disable-canvas-path-rendering',
+      '--js-flags="--max-old-space-size=512"',
       '--disk-cache-size=10485760',
       '--media-cache-size=10485760',
       '--blink-settings=imagesEnabled=false'
@@ -126,7 +128,7 @@ export const initWhatsAppClient = async () => {
       dataPath: sessionPath
     }),
     puppeteer: puppeteerConfig,
-    webVersion: '2.3000.1041450038-alpha',
+    webVersion: '2.3000.1041716477-alpha',
     webVersionCache: {
       type: 'remote',
       remotePath: 'https://raw.githubusercontent.com/wppconnect-team/wa-version/main/html/{version}.html',
