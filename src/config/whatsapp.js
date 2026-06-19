@@ -105,6 +105,8 @@ export const initWhatsAppClient = async () => {
       '--disable-sync',
       '--disable-translate',
       '--mute-audio',
+      '--disable-audio-output',
+      '--disable-remote-fonts',
       '--disable-webrtc',
       '--disable-3d-apis',
       '--disable-speech-api',
@@ -153,10 +155,29 @@ export const initWhatsAppClient = async () => {
     console.error('❌ WhatsApp Authentication Failure:', msg);
   });
 
-  client.on('ready', () => {
+  client.on('ready', async () => {
     currentQR = null;
     isConnected = true;
     console.log('🚀 WhatsApp Client is READY and ONLINE confirmation logged!');
+    
+    // Intercept Puppeteer requests to block media, image, and font downloads to save bandwidth/RAM
+    try {
+      const page = client.pupPage;
+      if (page) {
+        await page.setRequestInterception(true);
+        page.on('request', (request) => {
+          const resourceType = request.resourceType();
+          if (['image', 'media', 'font'].includes(resourceType)) {
+            request.abort();
+          } else {
+            request.continue();
+          }
+        });
+        console.log('🛡️ Puppeteer request interception active: Blocked images, media, and fonts.');
+      }
+    } catch (e) {
+      console.warn('⚠️ Request interception setup skipped/failed:', e.message);
+    }
   });
 
   client.on('disconnected', async (reason) => {
