@@ -111,10 +111,23 @@ export const initWhatsAppClient = async () => {
       '--disable-3d-apis',
       '--disable-speech-api',
       '--disable-canvas-path-rendering',
-      '--js-flags="--max-old-space-size=512"',
+      '--js-flags="--max-old-space-size=120"',
       '--disk-cache-size=10485760',
       '--media-cache-size=10485760',
-      '--blink-settings=imagesEnabled=false'
+      '--blink-settings=imagesEnabled=false',
+      '--disable-renderer-accessibility',
+      '--disable-dev-profile',
+      '--disable-ipc-flooding-protection',
+      '--disable-breakpad',
+      '--disable-client-side-phishing-detection',
+      '--disable-notifications',
+      '--disable-logging',
+      '--disable-print-preview',
+      '--disable-speech',
+      '--no-first-run',
+      '--no-default-browser-check',
+      '--password-store=basic',
+      '--use-mock-keychain'
     ]
   };
 
