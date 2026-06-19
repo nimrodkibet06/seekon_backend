@@ -2,6 +2,7 @@ import Product from '../models/Product.js';
 import SystemLog from '../models/SystemLog.js';
 import Order from '../models/Order.js';
 import { imageQueue } from '../queues/imageQueue.js';
+import Groq from 'groq-sdk';
 
 // Safe parser helper for arrays in multipart/form-data
 const parseArray = (field) => {
@@ -657,6 +658,36 @@ export const getProcessingUploads = async (req, res) => {
       success: false,
       message: 'Failed to fetch processing progress'
     });
+  }
+};
+
+export const generateDescription = async (req, res) => {
+  try {
+    const { productName } = req.body;
+    if (!productName || !productName.trim()) {
+      return res.status(400).json({ success: false, message: "Product name is required." });
+    }
+
+    const groq = new Groq({ apiKey: process.env.GROQ_API_KEY });
+    const response = await groq.chat.completions.create({
+      model: "llama3-8b-8192",
+      messages: [
+        {
+          role: "system",
+          content: "You are an expert e-commerce copywriter for Seekon Apparel. Generate a modern, persuasive 2-paragraph product description for the provided product name. YOU MUST OUTPUT ONLY THE DESCRIPTION TEXT. Do not use markdown, do not use asterisks, and DO NOT include any introductory or concluding phrases like 'Here is the description' or 'Sure!'. Start immediately with the first word of the description."
+        },
+        {
+          role: "user",
+          content: productName
+        }
+      ]
+    });
+
+    const description = response.choices[0]?.message?.content || "";
+    return res.status(200).json({ success: true, description });
+  } catch (error) {
+    console.error("Error generating product description:", error);
+    return res.status(500).json({ success: false, message: "Failed to generate product description." });
   }
 };
 

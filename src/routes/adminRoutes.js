@@ -27,7 +27,8 @@ import {
   getProduct,
   createProduct,
   updateProduct,
-  deleteProduct
+  deleteProduct,
+  generateDescription
 } from '../controllers/productController.js';
 import {
   getAllOrders,
@@ -188,6 +189,7 @@ router.put('/users/:id/reactivate', authMiddleware, adminMiddleware, reactivateU
 router.get('/products', authMiddleware, adminMiddleware, getAllProducts);
 router.get('/products/:id', authMiddleware, adminMiddleware, getProduct);
 router.post('/products', authMiddleware, adminMiddleware, uploadQueueMultiple, createProduct);
+router.post('/products/generate-description', authMiddleware, adminMiddleware, generateDescription);
 router.put('/products/:id', authMiddleware, adminMiddleware, updateProduct);
 router.delete('/products/:id', authMiddleware, adminMiddleware, deleteProduct);
 

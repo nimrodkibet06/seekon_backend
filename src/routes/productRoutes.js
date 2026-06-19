@@ -9,7 +9,8 @@ import {
   canUserReview,
   migrateCategoryTypo,
   getBestSellers,
-  getProcessingUploads
+  getProcessingUploads,
+  generateDescription
 } from '../controllers/productController.js';
 import { authMiddleware, adminMiddleware } from '../middleware/auth.js';
 import { uploadQueueMultiple } from '../middleware/queueUpload.js';
@@ -31,6 +32,7 @@ router.get('/:id/can-review', authMiddleware, canUserReview);
 
 // Admin Routes (Only for creating/editing) - Protected and Admin only
 router.post('/', authMiddleware, adminMiddleware, uploadQueueMultiple, createProduct);
+router.post('/generate-description', authMiddleware, adminMiddleware, generateDescription);
 router.put('/:id', authMiddleware, adminMiddleware, updateProduct);
 router.delete('/:id', authMiddleware, adminMiddleware, deleteProduct);
 
