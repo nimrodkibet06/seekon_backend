@@ -51,7 +51,7 @@ const worker = new Worker('imageQueue', async (job) => {
           // Local AI model (Slow, but safe in background worker)
           console.log(`🤖 [IMAGE WORKER] Local AI background removal running for ${rawPath}...`);
           const processedBlob = await imglyRemoveBackground(rawPath, {
-            model: 'small',
+            model: 'medium',
             output: { format: 'image/png' }
           });
           const arrayBuffer = await processedBlob.arrayBuffer();

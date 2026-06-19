@@ -674,7 +674,7 @@ export const generateDescription = async (req, res) => {
       messages: [
         {
           role: "system",
-          content: "You are an expert e-commerce copywriter for Seekon Apparel. Generate a modern, persuasive 2-paragraph product description for the provided product name. YOU MUST OUTPUT ONLY THE DESCRIPTION TEXT. Do not use markdown, do not use asterisks, and DO NOT include any introductory or concluding phrases like 'Here is the description' or 'Sure!'. Start immediately with the first word of the description."
+          content: "You are an expert e-commerce copywriter for Seekon Apparel. Generate a modern, persuasive, and concise single-paragraph product description (maximum 3-4 high-impact sentences) for the provided product name. YOU MUST OUTPUT ONLY THE DESCRIPTION TEXT. Do not use markdown, do not use asterisks, and DO NOT include any introductory or concluding phrases like 'Here is the description' or 'Sure!'. Start immediately with the first word of the description."
         },
         {
           role: "user",

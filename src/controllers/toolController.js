@@ -106,7 +106,7 @@ export const removeBackground = async (req, res) => {
       
       try {
         const processedBlob = await imglyRemoveBackground(file.path, {
-          model: 'small',
+          model: 'medium',
           output: {
             format: 'image/png'
           }
