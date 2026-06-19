@@ -139,6 +139,8 @@ Visit `http://localhost:3000` to see the API status.
 - Cloudinary handles automatic image optimization
 - Daraja integration uses Safaricom sandbox environment
 
+Contributor test by petero-codes.
+
 
 
 
