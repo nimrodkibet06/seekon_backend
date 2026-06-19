@@ -128,4 +128,19 @@ export const initMpesaSyncCron = () => {
       console.error('🔥 CRON: Global error in M-Pesa sync:', err.message);
     }
   });
+
+  // Memory Cleanup Cron: Run garbage collection every 15 minutes to reclaim unused V8 RAM
+  cron.schedule('*/15 * * * *', () => {
+    if (global.gc) {
+      try {
+        global.gc();
+        console.log('🧹 [CRON]: Node.js process Garbage Collection forced successfully.');
+      } catch (e) {
+        console.warn('⚠️ [CRON]: Manual garbage collection failed:', e.message);
+      }
+    } else {
+      // Graceful log - no-op if expose-gc flag isn't set
+      console.log('🧹 [CRON]: Manual GC skipped (expose-gc flag not enabled in startup).');
+    }
+  });
 };

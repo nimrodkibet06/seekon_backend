@@ -111,7 +111,7 @@ export const initWhatsAppClient = async () => {
       '--disable-3d-apis',
       '--disable-speech-api',
       '--disable-canvas-path-rendering',
-      '--js-flags="--max-old-space-size=120"',
+      '--js-flags="--max-old-space-size=120 --expose-gc"',
       '--disk-cache-size=10485760',
       '--media-cache-size=10485760',
       '--blink-settings=imagesEnabled=false',
@@ -191,6 +191,23 @@ export const initWhatsAppClient = async () => {
     } catch (e) {
       console.warn('⚠️ Request interception setup skipped/failed:', e.message);
     }
+
+    // Periodically trigger page-level garbage collection in Chrome to free leaked WhatsApp Web RAM
+    setInterval(async () => {
+      try {
+        const page = client?.pupPage;
+        if (page && isConnected) {
+          await page.evaluate(() => {
+            if (typeof window.gc === 'function') {
+              window.gc();
+            }
+          });
+          console.log('🧹 [PUPPETEER]: Forced garbage collection inside Chromium page.');
+        }
+      } catch (gcErr) {
+        // Suppress errors if page is not active
+      }
+    }, 1800000); // Every 30 minutes
   });
 
   client.on('disconnected', async (reason) => {

@@ -5,14 +5,14 @@
   "type": "module",
   "main": "src/server.js",
   "scripts": {
-    "dev": "nodemon src/server.js",
-    "start": "node src/server.js",
-    "worker": "node src/workers/imageWorker.js",
-    "start:all": "node src/server.js & node src/workers/imageWorker.js",
-    "create-admin": "node src/scripts/createAdmin.js",
-    "clean-test-data": "node src/scripts/cleanTestData.js",
-    "seed:smart": "node SmartSeed.js",
-    "seed:stock": "node updateStock.js"
+    "dev": "nodemon --exec \"node --expose-gc\" src/server.js",
+    "start": "node --expose-gc src/server.js",
+    "worker": "node --expose-gc src/workers/imageWorker.js",
+    "start:all": "node --expose-gc src/server.js & node --expose-gc src/workers/imageWorker.js",
+    "create-admin": "node --expose-gc src/scripts/createAdmin.js",
+    "clean-test-data": "node --expose-gc src/scripts/cleanTestData.js",
+    "seed:smart": "node --expose-gc SmartSeed.js",
+    "seed:stock": "node --expose-gc updateStock.js"
   },
   "keywords": [
     "seekon",
