@@ -111,14 +111,20 @@ export const addToCart = async (req, res) => {
       return res.status(404).json({ success: false, message: 'Product not found' });
     }
     
-    // SECURITY: Verify the requested color is valid for this product
-    if (product.colors && product.colors.length > 0 && !product.colors.includes(color)) {
-      return res.status(400).json({ success: false, message: 'Invalid color for this product' });
+    // Helper variables for filtering out blank/empty sizes or colors
+    const validColors = product.colors?.filter(c => c && c.trim()) || [];
+    const hasValidColors = validColors.length > 0;
+    const validSizes = product.sizes?.filter(s => s && s.trim()) || [];
+    const hasValidSizes = validSizes.length > 0;
+
+    // SECURITY: Verify the requested color is valid for this product if colors exist
+    if (hasValidColors && (!color || !validColors.includes(color))) {
+      return res.status(400).json({ success: false, message: 'Invalid or missing color for this product' });
     }
     
     // SECURITY: Verify size is valid if product has sizes
-    if (size && product.sizes && product.sizes.length > 0 && !product.sizes.includes(size)) {
-      return res.status(400).json({ success: false, message: 'Invalid size for this product' });
+    if (hasValidSizes && (!size || !validSizes.includes(size))) {
+      return res.status(400).json({ success: false, message: 'Invalid or missing size for this product' });
     }
     
     // SECURITY: Use price from database, never trust client-provided price
