@@ -93,7 +93,7 @@ router.get('/stats', authMiddleware, adminMiddleware, getAdminStats);
 router.get('/analytics', authMiddleware, adminMiddleware, getAnalytics);
 router.get('/dashboard', authMiddleware, adminMiddleware, getDashboardStats);
 router.get('/transactions', authMiddleware, adminMiddleware, getAllTransactions);
-router.get('/transactions/:id', authMiddleware, getTransaction);
+router.get('/transactions/:id', authMiddleware, adminMiddleware, getTransaction);
 router.get('/transactions/export/csv', authMiddleware, adminMiddleware, exportTransactions);
 
 // User management
@@ -204,9 +204,9 @@ router.delete('/products/:id', authMiddleware, adminMiddleware, deleteProduct);
 
 // Order management
 router.get('/orders', authMiddleware, adminMiddleware, getAllOrders);
-router.get('/orders/:id', authMiddleware, getOrder);
-router.patch('/orders/:id/status', authMiddleware, updateOrderStatus);
-router.patch('/orders/:id/cancel', authMiddleware, cancelOrder);
+router.get('/orders/:id', authMiddleware, adminMiddleware, getOrder);
+router.patch('/orders/:id/status', authMiddleware, adminMiddleware, updateOrderStatus);
+router.patch('/orders/:id/cancel', authMiddleware, adminMiddleware, cancelOrder);
 
 // Cleanup route
 router.delete('/cleanup-abandoned', authMiddleware, adminMiddleware, cleanupAbandonedOrders);
