@@ -45,7 +45,7 @@ import {
 } from '../controllers/couponController.js';
 import { authMiddleware, adminMiddleware } from '../middleware/auth.js';
 import Notification from '../models/Notification.js';
-import { getStatus, initWhatsAppClient } from '../config/whatsapp.js';
+import { getStatus, initWhatsAppClient, logoutWhatsAppClient } from '../config/whatsapp.js';
 import { uploadQueueMultiple } from '../middleware/queueUpload.js';
 
 const router = express.Router();
@@ -75,6 +75,15 @@ router.post('/bot-status/refresh', authMiddleware, adminMiddleware, async (req, 
   try {
     await initWhatsAppClient();
     res.status(200).json({ success: true, message: 'WhatsApp client reinitialized successfully' });
+  } catch (error) {
+    res.status(500).json({ success: false, message: error.message });
+  }
+});
+
+router.post('/bot-status/logout', authMiddleware, adminMiddleware, async (req, res) => {
+  try {
+    await logoutWhatsAppClient();
+    res.status(200).json({ success: true, message: 'WhatsApp client force logged out and reinitialized' });
   } catch (error) {
     res.status(500).json({ success: false, message: error.message });
   }
