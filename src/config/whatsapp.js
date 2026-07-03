@@ -179,11 +179,17 @@ export const initWhatsAppClient = async () => {
       if (page) {
         await page.setRequestInterception(true);
         page.on('request', (request) => {
-          const resourceType = request.resourceType();
-          if (['image', 'media', 'font'].includes(resourceType)) {
-            request.abort();
-          } else {
-            request.continue();
+          try {
+            if (request.isInterceptResolutionHandled()) return;
+            
+            const resourceType = request.resourceType();
+            if (['image', 'media', 'font'].includes(resourceType)) {
+              request.abort().catch(() => {});
+            } else {
+              request.continue().catch(() => {});
+            }
+          } catch (err) {
+            // Suppress errors if request is already handled or resolved
           }
         });
         console.log('🛡️ Puppeteer request interception active: Blocked images, media, and fonts.');
