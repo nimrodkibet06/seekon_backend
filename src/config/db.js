@@ -16,6 +16,12 @@ export const connectDB = async () => {
       // It forces the connection to use IPv4, solving the "querySrv" error
       family: 4,
       serverSelectionTimeoutMS: 5000, // Fail after 5 seconds
+      
+      // Connection Pooling & Azure Keep-Alive configuration
+      maxPoolSize: 50,              // Limit pool size to prevent database overload
+      minPoolSize: 5,               // Maintain at least 5 connections ready
+      socketTimeoutMS: 45000,       // Close inactive sockets after 45 seconds
+      heartbeatFrequencyMS: 30000,  // Ping every 30s to keep Azure Load Balancer connection alive
     });
 
     console.log('✅ MongoDB Connected Successfully!');
