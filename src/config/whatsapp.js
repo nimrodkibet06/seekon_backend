@@ -376,6 +376,39 @@ export const sendSafeMessage = async (clientInstance, phone, message, attempt = 
   }
 };
 
+export const logoutWhatsAppClient = async () => {
+  console.log('🛑 Force logout requested for WhatsApp client...');
+  
+  if (client) {
+    try {
+      if (isConnected) {
+        console.log('🔄 Calling client.logout()...');
+        await client.logout();
+      }
+    } catch (e) {
+      console.warn('⚠️ Error calling client.logout():', e.message);
+    }
+    
+    console.log('🔄 Destroying client instance...');
+    await safeDestroy();
+  }
+  
+  // Wipe session directory
+  const sessionPath = getSessionDataPath();
+  try {
+    if (fs.existsSync(sessionPath)) {
+      fs.rmSync(sessionPath, { recursive: true, force: true });
+      console.log(`🗑️ Successfully deleted session directory at: ${sessionPath}`);
+    }
+  } catch (err) {
+    console.error('❌ Failed to delete session directory:', err.message);
+  }
+  
+  // Reinitialize client to generate a new QR code
+  console.log('🔄 Reinitializing a fresh WhatsApp client...');
+  await initWhatsAppClient();
+};
+
 export const getStatus = () => {
   return {
     connected: isConnected,
