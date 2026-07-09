@@ -198,9 +198,15 @@ export const updateAuthorizedPhones = async (req, res) => {
       return res.status(400).json({ message: 'Phones must be an array of phone numbers' });
     }
 
-    // Clean and validate numbers: remove non-digits, ensure length
+    // Clean and validate numbers: remove non-digits, convert local format to international (254)
     const cleanedPhones = phones
-      .map(num => String(num).replace(/\D/g, ''))
+      .map(num => {
+        let clean = String(num).replace(/\D/g, '');
+        if (clean.startsWith('0') && clean.length === 10) {
+          clean = '254' + clean.slice(1);
+        }
+        return clean;
+      })
       .filter(num => num.length >= 9);
 
     const settings = await Setting.findOneAndUpdate(

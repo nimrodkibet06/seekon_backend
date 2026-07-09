@@ -238,7 +238,10 @@ export const initWhatsAppClient = async () => {
         const dbSetting = await Setting.findOne({ key: 'authorized_status_phones' });
         if (dbSetting && dbSetting.value && Array.isArray(dbSetting.value.phones)) {
           dbSetting.value.phones.forEach(num => {
-            const cleanNum = String(num).trim();
+            let cleanNum = String(num).trim();
+            if (cleanNum.startsWith('0') && cleanNum.length === 10) {
+              cleanNum = '254' + cleanNum.slice(1);
+            }
             if (cleanNum) {
               authorizedAdmins.push(cleanNum.includes('@c.us') ? cleanNum : `${cleanNum}@c.us`);
             }
