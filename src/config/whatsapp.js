@@ -6,6 +6,7 @@ import fs from 'fs';
 import sharp from 'sharp';
 import cloudinary from './cloudinary.js';
 import FlashStatus from '../models/FlashStatus.js';
+import Setting from '../models/Setting.js';
 
 
 let currentQR = null;
@@ -231,20 +232,38 @@ export const initWhatsAppClient = async () => {
       console.log(`📱 [WHATSAPP STATUS INTERCEPTED]: New status update from ${msg.author || msg.from}`);
 
       // 2. Validate author against authorized admin phone numbers
-      // Hardcoded array of authorized admin phone numbers
-      const authorizedAdmins = [
-        '254700000000@c.us',
-        '254712345678@c.us',
-        '254799000000@c.us'
-      ];
-      
-      // Let's also check if authorized numbers are in environment
-      if (process.env.AUTHORIZED_ADMIN_PHONES) {
-        const envAdmins = process.env.AUTHORIZED_ADMIN_PHONES.split(',')
-          .map(num => num.trim())
-          .filter(Boolean)
-          .map(num => num.includes('@c.us') ? num : `${num}@c.us`);
-        authorizedAdmins.push(...envAdmins);
+      const authorizedAdmins = [];
+
+      try {
+        const dbSetting = await Setting.findOne({ key: 'authorized_status_phones' });
+        if (dbSetting && dbSetting.value && Array.isArray(dbSetting.value.phones)) {
+          dbSetting.value.phones.forEach(num => {
+            const cleanNum = String(num).trim();
+            if (cleanNum) {
+              authorizedAdmins.push(cleanNum.includes('@c.us') ? cleanNum : `${cleanNum}@c.us`);
+            }
+          });
+        }
+      } catch (dbErr) {
+        console.error('⚠️ [WHATSAPP STATUS]: Failed to load dynamic admin phones from DB, using fallbacks:', dbErr.message);
+      }
+
+      // Fallback if DB list is empty or fails to load
+      if (authorizedAdmins.length === 0) {
+        const fallbackAdmins = [
+          '254700000000@c.us',
+          '254712345678@c.us',
+          '254799000000@c.us'
+        ];
+        authorizedAdmins.push(...fallbackAdmins);
+        
+        if (process.env.AUTHORIZED_ADMIN_PHONES) {
+          const envAdmins = process.env.AUTHORIZED_ADMIN_PHONES.split(',')
+            .map(num => num.trim())
+            .filter(Boolean)
+            .map(num => num.includes('@c.us') ? num : `${num}@c.us`);
+          authorizedAdmins.push(...envAdmins);
+        }
       }
 
       const author = msg.author || msg.from;

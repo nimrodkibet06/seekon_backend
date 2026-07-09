@@ -170,3 +170,52 @@ export const subscribeNewsletter = async (req, res) => {
     res.status(500).json({ success: false, message: 'Server error. Please try again later.' });
   }
 };
+
+// Get authorized phone numbers (Admin only)
+export const getAuthorizedPhones = async (req, res) => {
+  try {
+    const settings = await Setting.findOne({ key: 'authorized_status_phones' });
+    if (!settings) {
+      // Default empty array or fallback env if not found
+      const defaultPhones = process.env.AUTHORIZED_ADMIN_PHONES
+        ? process.env.AUTHORIZED_ADMIN_PHONES.split(',').map(num => num.trim()).filter(Boolean)
+        : ['254700000000', '254712345678'];
+      return res.status(200).json({ success: true, phones: defaultPhones });
+    }
+    res.status(200).json({ success: true, phones: settings.value.phones || [] });
+  } catch (error) {
+    console.error('❌ GET_AUTHORIZED_PHONES Error:', error.message);
+    res.status(500).json({ message: 'Error fetching authorized phones', error: error.message });
+  }
+};
+
+// Update authorized phone numbers (Admin only)
+export const updateAuthorizedPhones = async (req, res) => {
+  try {
+    const { phones } = req.body;
+    
+    if (!Array.isArray(phones)) {
+      return res.status(400).json({ message: 'Phones must be an array of phone numbers' });
+    }
+
+    // Clean and validate numbers: remove non-digits, ensure length
+    const cleanedPhones = phones
+      .map(num => String(num).replace(/\D/g, ''))
+      .filter(num => num.length >= 9);
+
+    const settings = await Setting.findOneAndUpdate(
+      { key: 'authorized_status_phones' },
+      { 
+        key: 'authorized_status_phones',
+        value: { phones: cleanedPhones },
+        updatedAt: Date.now()
+      },
+      { new: true, upsert: true }
+    );
+    
+    res.status(200).json({ success: true, phones: settings.value.phones });
+  } catch (error) {
+    console.error('❌ UPDATE_AUTHORIZED_PHONES Error:', error.message);
+    res.status(500).json({ message: 'Error updating authorized phones', error: error.message });
+  }
+};
