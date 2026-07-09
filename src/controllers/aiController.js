@@ -1,8 +1,7 @@
-import Groq from 'groq-sdk';
+import { getGroqClient } from '../utils/groqProvider.js';
 import Product from '../models/Product.js';
 import Setting from '../models/Setting.js';
 
-const groq = new Groq({ apiKey: process.env.GROQ_API_KEY });
 
 // 1. Define the Tool using Groq/OpenAI syntax
 const tools = [
@@ -31,6 +30,7 @@ const systemPrompt = `You are Seekon AI, an expert shopping assistant.
 export const processAIChat = async (req, res) => {
 try {
 const { message, history = [] } = req.body;
+const groq = getGroqClient();
 if (!message) return res.status(400).json({ success: false, message: "Message required." });
 
 // Map frontend history to Groq syntax

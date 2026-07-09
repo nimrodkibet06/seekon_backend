@@ -2,7 +2,8 @@ import Product from '../models/Product.js';
 import SystemLog from '../models/SystemLog.js';
 import Order from '../models/Order.js';
 import { imageQueue } from '../queues/imageQueue.js';
-import Groq from 'groq-sdk';
+import { getGroqClient } from '../utils/groqProvider.js';
+
 
 // Safe parser helper for arrays in multipart/form-data
 const parseArray = (field) => {
@@ -668,7 +669,7 @@ export const generateDescription = async (req, res) => {
       return res.status(400).json({ success: false, message: "Product name is required." });
     }
 
-    const groq = new Groq({ apiKey: process.env.GROQ_API_KEY });
+    const groq = getGroqClient();
     const response = await groq.chat.completions.create({
       model: "llama-3.3-70b-versatile",
       messages: [

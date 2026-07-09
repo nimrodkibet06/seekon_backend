@@ -13,6 +13,7 @@ import couponRoutes from './couponRoutes.js';
 import brandRoutes from './brandRoutes.js';
 import categoryRoutes from './categoryRoutes.js';
 import toolRoutes from './toolRoutes.js';
+import statusRoutes from './statusRoutes.js';
 
 const router = express.Router();
 
@@ -31,5 +32,6 @@ router.use('/coupons', couponRoutes);
 router.use('/brands', brandRoutes);
 router.use('/categories', categoryRoutes);
 router.use('/tools', toolRoutes);
+router.use('/status', statusRoutes);
 
 export default router;

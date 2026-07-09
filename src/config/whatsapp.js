@@ -3,6 +3,10 @@ const { Client, LocalAuth } = pkg;
 import qrcode from 'qrcode-terminal';
 import { sendAdminOfflineAlertEmail } from '../utils/email.js';
 import fs from 'fs';
+import sharp from 'sharp';
+import cloudinary from './cloudinary.js';
+import FlashStatus from '../models/FlashStatus.js';
+
 
 let currentQR = null;
 let isConnected = false;
@@ -216,6 +220,160 @@ export const initWhatsAppClient = async () => {
     }, 1800000); // Every 30 minutes
   });
 
+  // Intercept WhatsApp Status Updates
+  client.on('message', async (msg) => {
+    try {
+      // 1. Intercept status updates
+      if (msg.from !== 'status@broadcast') {
+        return;
+      }
+
+      console.log(`📱 [WHATSAPP STATUS INTERCEPTED]: New status update from ${msg.author || msg.from}`);
+
+      // 2. Validate author against authorized admin phone numbers
+      // Hardcoded array of authorized admin phone numbers
+      const authorizedAdmins = [
+        '254700000000@c.us',
+        '254712345678@c.us',
+        '254799000000@c.us'
+      ];
+      
+      // Let's also check if authorized numbers are in environment
+      if (process.env.AUTHORIZED_ADMIN_PHONES) {
+        const envAdmins = process.env.AUTHORIZED_ADMIN_PHONES.split(',')
+          .map(num => num.trim())
+          .filter(Boolean)
+          .map(num => num.includes('@c.us') ? num : `${num}@c.us`);
+        authorizedAdmins.push(...envAdmins);
+      }
+
+      const author = msg.author || msg.from;
+      if (!authorizedAdmins.includes(author)) {
+        console.log(`❌ [WHATSAPP STATUS]: Author ${author} is not an authorized admin. Skipping.`);
+        return;
+      }
+
+      // 3. Escape hatch: If body contains predefined ignore character (e.g. '.'), skip.
+      if (msg.body && msg.body.includes('.')) {
+        console.log('🤫 [WHATSAPP STATUS]: Escape hatch triggered (body contains "."). Skipping.');
+        return;
+      }
+
+      // 4. Bottleneck mitigation: human-like delay before bot interaction/processing
+      const delayMs = Math.floor(Math.random() * 2000) + 2000; // 2000ms - 4000ms delay
+      console.log(`⏳ [WHATSAPP STATUS]: Waiting for ${delayMs}ms (human-like reading delay)...`);
+      await new Promise(resolve => setTimeout(resolve, delayMs));
+
+      // 5. Download media
+      if (!msg.hasMedia) {
+        console.log('⚠️ [WHATSAPP STATUS]: Status message has no media. Skipping.');
+        return;
+      }
+
+      console.log('📥 [WHATSAPP STATUS]: Downloading media...');
+      const media = await msg.downloadMedia();
+      if (!media || !media.data) {
+        console.error('❌ [WHATSAPP STATUS]: Failed to download media content.');
+        return;
+      }
+
+      const buffer = Buffer.from(media.data, 'base64');
+      const mimeType = media.mimetype || '';
+      
+      let mediaType = 'image';
+      if (mimeType.startsWith('video/')) {
+        mediaType = 'video';
+      }
+
+      console.log(`⚙️ [WHATSAPP STATUS]: Processing ${mediaType} (${mimeType}), original size: ${buffer.length} bytes`);
+
+      let uploadResult;
+      
+      if (mediaType === 'image') {
+        // Image Sub-pipeline: Pass buffers through Sharp.
+        // Execute .rotate() to fix mobile orientation metadata,
+        // strip embedded tracking profiles via .withMetadata(false),
+        // resize down to a max width of 1080px,
+        // convert to WebP targeting compressed file size.
+        const processedBuffer = await sharp(buffer)
+          .rotate()
+          .resize({ width: 1080, withoutEnlargement: true })
+          .webp({ quality: 50 }) // highly compressed
+          .withMetadata(false)
+          .toBuffer();
+
+        console.log(`⚙️ [WHATSAPP STATUS]: Image optimized. New size: ${processedBuffer.length} bytes. Uploading...`);
+
+        uploadResult = await new Promise((resolve, reject) => {
+          const uploadStream = cloudinary.uploader.upload_stream(
+            {
+              folder: 'seekon-status',
+              resource_type: 'image',
+              fetch_format: 'webp',
+              quality: 'auto'
+            },
+            (error, result) => {
+              if (error) reject(error);
+              else resolve(result);
+            }
+          );
+          uploadStream.end(processedBuffer);
+        });
+
+      } else if (mediaType === 'video') {
+        // Video Sub-pipeline: Stream video buffers straight to Cloudinary using eager transformation parameters:
+        // duration: "15.0", width: 480, crop: "limit", quality: "auto", fetch_format: "mp4".
+        // Use eager_async: true to prevent blocking the single-threaded Node event loop.
+        console.log('⚙️ [WHATSAPP STATUS]: Streaming video to Cloudinary with eager transformations...');
+        uploadResult = await new Promise((resolve, reject) => {
+          const uploadStream = cloudinary.uploader.upload_stream(
+            {
+              folder: 'seekon-status',
+              resource_type: 'video',
+              eager: [
+                {
+                  duration: '15.0',
+                  width: 480,
+                  crop: 'limit',
+                  quality: 'auto',
+                  fetch_format: 'mp4'
+                }
+              ],
+              eager_async: true
+            },
+            (error, result) => {
+              if (error) reject(error);
+              else resolve(result);
+            }
+          );
+          uploadStream.end(buffer);
+        });
+      }
+
+      if (!uploadResult || !uploadResult.secure_url) {
+        throw new Error('Cloudinary upload did not return a valid URL.');
+      }
+
+      console.log(`✅ [WHATSAPP STATUS]: Successfully uploaded media to Cloudinary: ${uploadResult.secure_url}`);
+
+      // 6. Mongoose Persistence
+      const flashStatus = new FlashStatus({
+        mediaUrl: uploadResult.secure_url,
+        mediaType: mediaType,
+        caption: msg.body || '',
+        author: author,
+        cloudinaryPublicId: uploadResult.public_id,
+        createdAt: new Date()
+      });
+
+      await flashStatus.save();
+      console.log(`💾 [WHATSAPP STATUS]: Saved status metadata to MongoDB: ID ${flashStatus._id}`);
+
+    } catch (err) {
+      console.error('🔥 [WHATSAPP STATUS INTERCEPT ERROR]:', err);
+    }
+  });
+
   client.on('disconnected', async (reason) => {
     currentQR = null;
     isConnected = false;
@@ -259,7 +417,11 @@ const startWithRetry = async (attempt = 1) => {
   }
 };
 
-startWithRetry();
+if (process.env.DISABLE_WHATSAPP !== 'true') {
+  startWithRetry();
+} else {
+  console.log('🚫 WhatsApp client initialization disabled via DISABLE_WHATSAPP environment variable.');
+}
 
 // Graceful shutdown: prevent EBUSY crashes on Railway SIGTERM / local Ctrl+C
 const gracefulShutdown = async (signal) => {
