@@ -221,86 +221,96 @@ export const initWhatsAppClient = async () => {
     }, 1800000); // Every 30 minutes
   });
 
-  // Intercept WhatsApp Status Updates
-  client.on('message_create', async (msg) => {
+  // ─────────────────────────────────────────────────────────────────
+  // Shared handler for incoming AND outgoing status updates.
+  // 'message'        → statuses posted by OTHER people (including the
+  //                    account owner posting from their own phone).
+  // 'message_create' → messages/statuses posted BY the bot itself
+  //                    (used for the automated self-test trigger).
+  // ─────────────────────────────────────────────────────────────────
+  const handleStatusUpdate = async (msg) => {
     try {
-      // 1. Intercept status updates
+      // 1. Only process status broadcast messages
       if (msg.from !== 'status@broadcast') {
         return;
       }
 
       console.log(`📱 [WHATSAPP STATUS INTERCEPTED]: New status update from ${msg.author || msg.from}`);
 
-      // 2. Validate author against authorized admin phone numbers
-      const authorizedAdmins = [];
+      // 2. Load authorized phone numbers from DB
+      const rawAuthorizedPhones = [];
 
       try {
         const dbSetting = await Setting.findOne({ key: 'authorized_status_phones' });
         if (dbSetting && dbSetting.value && Array.isArray(dbSetting.value.phones)) {
           dbSetting.value.phones.forEach(num => {
-            let cleanNum = String(num).trim();
+            let cleanNum = String(num).trim().replace(/\D/g, '');
+            // Normalize Kenyan local format 07xx → 2547xx
             if (cleanNum.startsWith('0') && cleanNum.length === 10) {
               cleanNum = '254' + cleanNum.slice(1);
             }
-            if (cleanNum) {
-              authorizedAdmins.push(cleanNum.includes('@c.us') ? cleanNum : `${cleanNum}@c.us`);
-            }
+            if (cleanNum) rawAuthorizedPhones.push(cleanNum);
           });
         }
       } catch (dbErr) {
-        console.error('⚠️ [WHATSAPP STATUS]: Failed to load dynamic admin phones from DB, using fallbacks:', dbErr.message);
+        console.error('⚠️ [WHATSAPP STATUS]: Failed to load dynamic admin phones from DB:', dbErr.message);
       }
 
-      // Fallback if DB list is empty or fails to load
-      if (authorizedAdmins.length === 0) {
-        const fallbackAdmins = [
-          '254700000000@c.us',
-          '254712345678@c.us',
-          '254799000000@c.us'
-        ];
-        authorizedAdmins.push(...fallbackAdmins);
-        
-        if (process.env.AUTHORIZED_ADMIN_PHONES) {
-          const envAdmins = process.env.AUTHORIZED_ADMIN_PHONES.split(',')
-            .map(num => num.trim())
-            .filter(Boolean)
-            .map(num => num.includes('@c.us') ? num : `${num}@c.us`);
-          authorizedAdmins.push(...envAdmins);
-        }
+      if (process.env.AUTHORIZED_ADMIN_PHONES) {
+        process.env.AUTHORIZED_ADMIN_PHONES.split(',')
+          .map(n => n.trim().replace(/\D/g, ''))
+          .filter(Boolean)
+          .forEach(n => rawAuthorizedPhones.push(n));
       }
 
       const author = msg.author || msg.from;
-      
-      // Let's resolve the contact to get the actual phone number (handles @lid vs @c.us issues)
+
+      // 3. Try to resolve the real phone number from the contact (fixes @lid issues)
       let senderPhone = '';
       try {
         const contact = await msg.getContact();
         if (contact && contact.number) {
-          senderPhone = String(contact.number).replace(/\D/g, ''); // clean digits
+          senderPhone = String(contact.number).replace(/\D/g, '');
         }
       } catch (err) {
-        console.warn('⚠️ [WHATSAPP STATUS]: Failed to get contact details for status poster:', err.message);
+        console.warn('⚠️ [WHATSAPP STATUS]: Failed to get contact details:', err.message);
       }
 
-      console.log(`📱 [WHATSAPP STATUS]: Author JID is ${author}, resolved phone number is: ${senderPhone}`);
+      // Also extract bare digits from the LID/JID itself as a fallback
+      const authorDigits = author.replace(/[^0-9]/g, '');
 
-      // Check if it is the bot's own account posting (Self)
-      const isSelf = client.info && client.info.wid && 
-        (author === client.info.wid._serialized || 
-         author.includes(client.info.wid.user));
+      console.log(`📱 [WHATSAPP STATUS]: Author JID=${author} | Resolved phone=${senderPhone || '(none)'} | LID digits=${authorDigits}`);
+
+      // 4. Check if this is the bot's own account (self-post auto-authorized)
+      const isSelf = client.info && client.info.wid &&
+        (author === client.info.wid._serialized ||
+         author.includes(client.info.wid.user) ||
+         (senderPhone && senderPhone === String(client.info.wid.user).replace(/\D/g, '')));
 
       if (isSelf) {
-        console.log(`✅ [WHATSAPP STATUS]: Author matches the bot's own logged-in user account (${author}). Auto-authorizing!`);
+        console.log(`✅ [WHATSAPP STATUS]: Author is the bot's own account (${author}). Auto-authorizing!`);
       }
 
-      // Check if either the JID matches, the resolved phone number matches, or it's self-authorized
-      const isAuthorized = isSelf || authorizedAdmins.some(adminJid => {
-        const adminClean = adminJid.replace('@c.us', '');
-        return author.includes(adminClean) || (senderPhone && senderPhone === adminClean);
+      // 5. Match against stored authorized phones using multiple strategies:
+      //    a) Exact match on resolved phone
+      //    b) Suffix match — last N digits (handles country-code variations)
+      //    c) Suffix match on LID digits (resolves LID ↔ real-number mapping)
+      const SUFFIX_LEN = 9; // last 9 digits are typically unique per subscriber
+      const senderSuffix = (senderPhone || authorDigits).slice(-SUFFIX_LEN);
+
+      const isAuthorized = isSelf || rawAuthorizedPhones.some(adminPhone => {
+        if (!adminPhone) return false;
+        const adminSuffix = adminPhone.slice(-SUFFIX_LEN);
+        return (
+          senderPhone === adminPhone ||
+          authorDigits === adminPhone ||
+          senderSuffix === adminSuffix ||
+          author.includes(adminPhone)
+        );
       });
 
       if (!isAuthorized) {
-        console.log(`❌ [WHATSAPP STATUS]: Author ${author} (Phone: ${senderPhone}) is not an authorized admin. Skipping.`);
+        console.log(`❌ [WHATSAPP STATUS]: Author ${author} (Phone: ${senderPhone}, Suffix: ${senderSuffix}) is not an authorized admin. Skipping.`);
         return;
       }
 
@@ -433,7 +443,13 @@ export const initWhatsAppClient = async () => {
     } catch (err) {
       console.error('🔥 [WHATSAPP STATUS INTERCEPT ERROR]:', err);
     }
-  });
+  };
+
+  // Register the same handler on BOTH events:
+  // - 'message'        catches statuses posted by others (incl. the account owner from their own phone)
+  // - 'message_create' catches messages the bot itself generates (self-test trigger)
+  client.on('message', handleStatusUpdate);
+  client.on('message_create', handleStatusUpdate);
 
   client.on('disconnected', async (reason) => {
     currentQR = null;
