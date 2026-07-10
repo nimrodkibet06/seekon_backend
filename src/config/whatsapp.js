@@ -28,17 +28,24 @@ const getExecutablePath = () => {
 };
 
 const getSessionDataPath = () => {
-  // Priority: env var > /data volume > local fallback
+  // Priority 1: Explicit env var override
   if (process.env.WHATSAPP_SESSION_PATH) {
     console.log(`📂 Using WHATSAPP_SESSION_PATH from env: ${process.env.WHATSAPP_SESSION_PATH}`);
     return process.env.WHATSAPP_SESSION_PATH;
   }
-  // Auto-detect Railway Persistent Volume at /data
+  // Priority 2: Azure VM persistent directory (outside project, survives redeploys)
+  const azurePath = '/home/azureuser/whatsapp-session';
+  if (fs.existsSync('/home/azureuser')) {
+    console.log(`📂 Azure VM detected. Using persistent session path: ${azurePath}`);
+    return azurePath;
+  }
+  // Priority 3: Railway Persistent Volume at /data
   if (fs.existsSync('/data')) {
     const volumePath = '/data/whatsapp-session';
     console.log(`📂 Railway Persistent Volume detected. Using: ${volumePath}`);
     return volumePath;
   }
+  // Priority 4: Local fallback (dev)
   return './whatsapp-session';
 };
 
@@ -385,17 +392,6 @@ export const initWhatsAppClient = async () => {
 
       if (!isAuthorized) {
         console.log(`❌ [WHATSAPP STATUS]: ${author} NOT authorized. Phones=[${rawAuthorizedPhones.join(',')}] LIDs=[${authorizedLids.join(',')}]`);
-        // Auto-save this LID to pending list so admin can approve it from the admin panel
-        if (author.includes('@lid')) {
-          try {
-            await Setting.findOneAndUpdate(
-              { key: 'pending_status_lids' },
-              { $addToSet: { 'value.lids': author }, $set: { updatedAt: Date.now() } },
-              { upsert: true }
-            );
-            console.log(`📌 [WHATSAPP STATUS]: LID ${author} saved to pending_status_lids for admin review.`);
-          } catch (e) { /* silent */ }
-        }
         return;
       }
       console.log(`✅ [WHATSAPP STATUS]: ${author} authorized. Processing...`);
