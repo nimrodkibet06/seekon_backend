@@ -51,12 +51,25 @@ const prepareSessionDir = (basePath) => {
       fs.mkdirSync(basePath, { recursive: true });
       console.log(`📂 Created WhatsApp session directory at ${basePath}`);
     }
-    // Remove stale lockfile if present (prevents EBUSY on shutdown/startup)
-    const lockFile = `${basePath}/session/lockfile`;
-    if (fs.existsSync(lockFile)) {
-      fs.unlinkSync(lockFile);
-      console.log('🗑️ Removed stale WhatsApp lockfile');
-    }
+    // Remove stale lockfiles if present (prevents EBUSY and launch/navigation issues)
+    const lockFiles = [
+      `${basePath}/session/lockfile`,
+      `${basePath}/session/Default/LOCK`,
+      `${basePath}/session/SingletonLock`,
+      `${basePath}/session/SingletonCookie`,
+      `${basePath}/session/SingletonSocket`
+    ];
+
+    lockFiles.forEach(file => {
+      if (fs.existsSync(file)) {
+        try {
+          fs.unlinkSync(file);
+          console.log(`🗑️ Removed stale WhatsApp/Chrome lockfile: ${file}`);
+        } catch (err) {
+          console.warn(`⚠️ Could not remove lockfile ${file}:`, err.message);
+        }
+      }
+    });
   } catch (e) {
     console.warn('⚠️ Unable to prepare WhatsApp session directory:', e.message);
   }
@@ -102,7 +115,6 @@ export const initWhatsAppClient = async () => {
       '--disable-gpu',
       '--no-zygote',
       '--disable-software-rasterizer',
-      '--single-process',
       '--disable-features=site-per-process',
       '--disable-extensions',
       '--disable-default-apps',
@@ -203,6 +215,64 @@ export const initWhatsAppClient = async () => {
       console.warn('⚠️ Request interception setup skipped/failed:', e.message);
     }
 
+    // Auto-resolve LIDs for all stored phone numbers
+    try {
+      console.log('🔍 [WHATSAPP]: Auto-resolving LIDs for stored phone numbers...');
+      const dbSetting = await Setting.findOne({ key: 'authorized_status_phones' });
+      const rawAuthorizedPhones = [];
+      if (dbSetting && dbSetting.value && Array.isArray(dbSetting.value.phones)) {
+        dbSetting.value.phones.forEach(num => {
+          let cleanNum = String(num).trim().replace(/\D/g, '');
+          if (cleanNum.startsWith('0') && cleanNum.length === 10) {
+            cleanNum = '254' + cleanNum.slice(1);
+          }
+          if (cleanNum) rawAuthorizedPhones.push(cleanNum);
+        });
+      }
+      if (process.env.AUTHORIZED_ADMIN_PHONES) {
+        process.env.AUTHORIZED_ADMIN_PHONES.split(',')
+          .map(n => n.trim().replace(/\D/g, ''))
+          .filter(Boolean)
+          .forEach(n => {
+            let cleanNum = n;
+            if (cleanNum.startsWith('0') && cleanNum.length === 10) {
+              cleanNum = '254' + cleanNum.slice(1);
+            }
+            rawAuthorizedPhones.push(cleanNum);
+          });
+      }
+
+      // De-duplicate phones
+      const uniquePhones = [...new Set(rawAuthorizedPhones)];
+      if (uniquePhones.length > 0 && typeof client.getContactLidAndPhone === 'function') {
+        const jids = uniquePhones.map(phone => `${phone}@c.us`);
+        console.log(`🔍 [WHATSAPP]: Querying LIDs for JIDs:`, jids);
+        const results = await client.getContactLidAndPhone(jids);
+        console.log(`🔥 [WHATSAPP]: Found LIDs:`, results);
+        
+        if (Array.isArray(results)) {
+          const resolvedLids = results
+            .map(res => res.lid)
+            .filter(Boolean)
+            .map(lid => lid.includes('@lid') ? lid : `${lid}@lid`);
+            
+          if (resolvedLids.length > 0) {
+            const lidSetting = await Setting.findOneAndUpdate(
+              { key: 'authorized_status_lids' },
+              { 
+                $addToSet: { 'value.lids': { $each: resolvedLids } },
+                $set: { updatedAt: Date.now() }
+              },
+              { new: true, upsert: true }
+            );
+            console.log('✅ [WHATSAPP]: Successfully saved/synced resolved LIDs to MongoDB:', lidSetting.value.lids);
+          }
+        }
+      }
+    } catch (resolveLidErr) {
+      console.error('⚠️ [WHATSAPP]: Failed to auto-resolve LIDs during ready:', resolveLidErr.message);
+    }
+
     // Periodically trigger page-level garbage collection in Chrome to free leaked WhatsApp Web RAM
     setInterval(async () => {
       try {
@@ -239,8 +309,10 @@ export const initWhatsAppClient = async () => {
         return;
       }
 
+      const author = msg.author || msg.from;
+
       // Dedup: build a fingerprint from author + timestamp
-      const msgKey = `${msg.author || msg.from}_${msg.timestamp || Date.now()}`;
+      const msgKey = `${author}_${msg.timestamp || Date.now()}`;
       if (recentlyProcessed.has(msgKey)) {
         return; // already being handled by the other event
       }
@@ -248,7 +320,7 @@ export const initWhatsAppClient = async () => {
       // Auto-expire dedup key after 10 seconds
       setTimeout(() => recentlyProcessed.delete(msgKey), 10000);
 
-      console.log(`📱 [WHATSAPP STATUS INTERCEPTED]: New status update from ${msg.author || msg.from}`);
+      console.log(`📱 [WHATSAPP STATUS INTERCEPTED]: New status update from ${author}`);
 
       // 2. Load authorized phone numbers from DB
       const rawAuthorizedPhones = [];
