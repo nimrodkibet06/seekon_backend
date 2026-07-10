@@ -516,6 +516,8 @@ const whatsappClient = {
   }
 };
 
+export const getRawClient = () => client;
+
 // Helper to get Admin Group Chat or fallback
 export const getAdminChat = async (clientInstance) => {
   const activeClient = client;

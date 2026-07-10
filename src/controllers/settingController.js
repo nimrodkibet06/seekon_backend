@@ -3,7 +3,7 @@ import Subscriber from '../models/Subscriber.js';
 import { sendContactEmail, sendNewsletterWelcome } from '../utils/email.js';
 import pkgWweb from 'whatsapp-web.js';
 const { MessageMedia } = pkgWweb;
-import whatsappClient from '../config/whatsapp.js';
+import whatsappClient, { getRawClient } from '../config/whatsapp.js';
 
 // Get exchange rate (Public)
 export const getExchangeRate = async (req, res) => {
@@ -232,19 +232,40 @@ export const updateAuthorizedPhones = async (req, res) => {
 // Trigger automated self-status broadcast (Admin only)
 export const triggerSelfStatus = async (req, res) => {
   try {
-    console.log('🚀 [WHATSAPP STATUS TRIGGER]: Triggering automated status update post...');
+    console.log('🚀 [WHATSAPP STATUS TRIGGER]: Triggering automated status update post via event simulation...');
     
+    const clientInstance = getRawClient();
+    if (!clientInstance) {
+      return res.status(400).json({ success: false, message: 'WhatsApp Client is not initialized or offline.' });
+    }
+
+    const selfJid = clientInstance.info?.wid?._serialized || '254727672772@c.us';
+
     // A tiny 1x1 green pixel base64 PNG image representing a status update
     const base64Data = 'iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mNk+M9QDwADhgGAWjR9awAAAABJRU5ErkJggg==';
-    const media = new MessageMedia('image/png', base64Data, 'auto-test-status.png');
+
+    // Construct mock message object that follows the whatsapp-web.js Message schema
+    const mockMessage = {
+      from: 'status@broadcast',
+      author: selfJid,
+      hasMedia: true,
+      body: `Seekon Engine Auto Verification Update: #${Date.now().toString().slice(-4)}`,
+      timestamp: Math.floor(Date.now() / 1000),
+      // mock downloadMedia function returning our base64 data
+      downloadMedia: async () => {
+        return {
+          mimetype: 'image/png',
+          data: base64Data,
+          filename: 'auto-test-status.png'
+        };
+      }
+    };
+
+    // Emit event on the client to simulate receipt of status update
+    console.log(`📱 [WHATSAPP STATUS TRIGGER]: Emitting simulated message_create event for author: ${selfJid}...`);
+    clientInstance.emit('message_create', mockMessage);
     
-    // Send to status@broadcast
-    await whatsappClient.sendMessage('status@broadcast', media, {
-      caption: `Seekon Engine Auto Verification Update: #${Date.now().toString().slice(-4)}`
-    });
-    
-    console.log('✅ [WHATSAPP STATUS TRIGGER]: Successfully sent automated status update message.');
-    res.status(200).json({ success: true, message: 'Automated status broadcast triggered successfully.' });
+    res.status(200).json({ success: true, message: 'Simulated status broadcast event triggered successfully.' });
   } catch (error) {
     console.error('❌ [WHATSAPP STATUS TRIGGER] Error:', error.message);
     res.status(500).json({ success: false, message: 'Failed to trigger status broadcast.', error: error.message });
