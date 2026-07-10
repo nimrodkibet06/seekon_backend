@@ -26,7 +26,7 @@ const isEmailDisposable = async (email) => {
 };
 import { sendPushNotificationToAdmins } from '../routes/notificationRoutes.js';
 import { sendOrderConfirmationEmail, sendOrderStatusUpdateEmail, sendAdminNotification } from '../utils/email.js';
-import whatsappClient, { sendSafeMessage, getAdminChat } from '../config/whatsapp.js';
+import whatsappClient, { sendSafeMessage } from '../config/whatsapp.js';
 
 // Create Order
 export const createOrder = async (req, res) => {
@@ -266,13 +266,11 @@ For support or modifications, please reply directly to this chat.`;
         console.error('❌ [WA-PIPELINE] Full error:', msgErr.stack || msgErr);
       }
 
-      // Admin notification via WhatsApp
+      // Admin notification via WhatsApp — sent directly to self (bot's own number)
       try {
-        const adminChat = await getAdminChat(whatsappClient);
-        
         if (!sentCustomerMsg) {
-          console.log('❌ [WA-PIPELINE] Customer message failed. Alerting admin...');
-          
+          console.log('❌ [WA-PIPELINE] Customer message failed. Alerting admin via self-message...');
+
           const adminAlertMsg = `⚠️ *SEEKON BOT ALERT* ⚠️
 _Customer WhatsApp Unreachable_
 
@@ -287,23 +285,19 @@ _Customer WhatsApp Unreachable_
 🔸 *Troubleshooting:*
 Please verify if the customer number *${phone}* is active on WhatsApp, or check server logs.`;
 
-          // Append status to database
-          const updatedNotes = order.notes 
-            ? `${order.notes}\nPending - WhatsApp Delivery Failed` 
+          // Append delivery failure note to database
+          const updatedNotes = order.notes
+            ? `${order.notes}\nPending - WhatsApp Delivery Failed`
             : 'Pending - WhatsApp Delivery Failed';
           await Order.findByIdAndUpdate(order._id, { notes: updatedNotes });
 
-          if (adminChat) {
-            await adminChat.sendMessage(adminAlertMsg);
-          } else {
-            try {
-              await sendSafeMessage(whatsappClient, 'me', adminAlertMsg);
-            } catch (dmErr) {
-              console.warn('⚠️ [WA-PIPELINE] Fallback admin alert DM failed:', dmErr.message);
-            }
+          try {
+            await sendSafeMessage(whatsappClient, 'me', adminAlertMsg);
+          } catch (dmErr) {
+            console.warn('⚠️ [WA-PIPELINE] Admin alert self-message failed:', dmErr.message);
           }
         } else {
-          console.log('✅ [WA-PIPELINE] Routing admin summary...');
+          console.log('✅ [WA-PIPELINE] Sending admin purchase summary to self...');
           const adminSummaryMsg = `👑 *SEEKON ADMIN DISPATCH* 👑
 _New Premium Order Alert_
 
@@ -332,14 +326,10 @@ ${itemsList}
 ✨ *Status:* Pending Dispatch
 Action required: Verify payment and update order status to shipped once dispatched.`;
 
-          if (adminChat) {
-            await adminChat.sendMessage(adminSummaryMsg);
-          } else {
-            try {
-              await sendSafeMessage(whatsappClient, 'me', adminSummaryMsg);
-            } catch (dmErr) {
-              console.warn('⚠️ [WA-PIPELINE] Fallback admin summary DM failed:', dmErr.message);
-            }
+          try {
+            await sendSafeMessage(whatsappClient, 'me', adminSummaryMsg);
+          } catch (dmErr) {
+            console.warn('⚠️ [WA-PIPELINE] Admin summary self-message failed:', dmErr.message);
           }
         }
         console.log('✅ [WA-PIPELINE] WhatsApp pipeline completed.');

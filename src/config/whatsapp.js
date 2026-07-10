@@ -456,10 +456,11 @@ const recentlyProcessed = new Set();
 const handleStatusUpsert = async (messages) => {
   for (const msg of messages) {
     try {
-      // STEP 4.1 — Only process messages from the 'status@broadcast' remoteJid
+      // Gate 1 — Hard filter: only process status@broadcast messages.
+      // Any other remoteJid (DMs, groups) is handled by its own dedicated listener.
       if (msg.key?.remoteJid !== 'status@broadcast') continue;
 
-      // Sender resolution: group participant takes priority over remoteJid
+      // Sender resolution: status participants use the participant field
       const senderId = msg.key?.participant || msg.key?.remoteJid;
 
       // Dedup fingerprint — prevents double-processing the same status event
@@ -474,14 +475,16 @@ const handleStatusUpsert = async (messages) => {
       const { authorizedPhones, authorizedLids } = await loadAuthorizedIdentifiers();
       console.log(`📱 [WA-STATUS]: Whitelist → phones: [${authorizedPhones.join(', ')}] | LIDs: [${authorizedLids.join(', ')}]`);
 
-      // STEP 3.2 & 3.3 — Authorize sender; handle @lid with clean string match
+      // STEP 3.2 & 3.3 — Authorization check with @lid hybrid support.
+      // BUG FIX: Unauthorized status senders are SKIPPED ONLY.
+      // Lead capture is NEVER triggered from status@broadcast — it belongs
+      // exclusively in the DM listener below (handleDirectMessageUpsert).
       if (!isSenderAuthorized(senderId, authorizedPhones, authorizedLids)) {
-        // STEP 5.3 — Unauthorized viewer → trigger First-Time Lead Captured flow
-        await handleLeadCapture(senderId);
-        continue;
+        console.log(`⏭️ [WA-STATUS]: ${senderId} not in whitelist — skipping status. No email triggered.`);
+        continue; // hard return: nothing else executes for this message
       }
 
-      console.log(`✅ [WA-STATUS]: ${senderId} authorized. Processing...`);
+      console.log(`✅ [WA-STATUS]: ${senderId} authorized. Processing status...`);
 
       // Escape hatch: caption containing '.' signals an intentional skip
       const caption =
@@ -515,7 +518,7 @@ const handleStatusUpsert = async (messages) => {
       await flashStatus.save();
       console.log(`💾 [WA-STATUS]: Saved to MongoDB: ID ${flashStatus._id}`);
 
-      // STEP 5.2 — Route finalized URL + metadata through customer lead pipeline
+      // STEP 5.2 — Route finalized URL + metadata through admin notification pipeline
       sendSuccessNotificationEmail('nimrodkibet376@gmail.com', {
         author:    senderId,
         type:      mediaType,
@@ -528,6 +531,36 @@ const handleStatusUpsert = async (messages) => {
     } catch (err) {
       // STEP 4.3 — Top-level boundary: a single status failure must never crash the process
       console.error('🔥 [WA-STATUS INTERCEPT ERROR]:', err.message || err);
+    }
+  }
+};
+
+// ─────────────────────────────────────────────────────────────────────────────
+// Lead capture — fires ONLY on authentic incoming direct messages.
+// Completely isolated from status@broadcast processing.
+// Triggered when a real customer DMs the store WhatsApp number directly.
+// ─────────────────────────────────────────────────────────────────────────────
+const handleDirectMessageUpsert = async (messages) => {
+  for (const msg of messages) {
+    try {
+      const remoteJid = msg.key?.remoteJid || '';
+
+      // Gate: only real 1-to-1 DMs (remoteJid ends with @s.whatsapp.net).
+      // Groups (@g.us), status broadcasts (status@broadcast),
+      // and system JIDs are all explicitly excluded.
+      if (!remoteJid.endsWith('@s.whatsapp.net')) continue;
+
+      // Ignore messages sent by the bot itself
+      if (msg.key?.fromMe) continue;
+
+      console.log(`📩 [WA-DM]: Incoming direct message from ${remoteJid}`);
+
+      // Fire the lead capture pipeline for this genuine customer contact
+      await handleLeadCapture(remoteJid);
+
+    } catch (err) {
+      // Non-fatal — DM lead capture must never crash anything
+      console.error('⚠️ [WA-DM]: Direct message lead handler error (non-fatal):', err.message);
     }
   }
 };
@@ -635,10 +668,20 @@ export const initWhatsAppClient = async () => {
   // ── Credential persistence ────────────────────────────────────────────────
   sock.ev.on('creds.update', saveCreds);
 
-  // ── STEP 4.1 — Status broadcast interception via messages.upsert ─────────
+  // ── STEP 4.1 — Status broadcast interception ─────────────────────────────
+  // Handles ONLY status@broadcast messages. Never triggers lead capture.
   sock.ev.on('messages.upsert', async ({ messages: msgs, type }) => {
-    if (type !== 'notify') return; // 'notify' = new real-time messages only
+    if (type !== 'notify') return;
     await handleStatusUpsert(msgs);
+  });
+
+  // ── Lead capture — incoming customer DMs only ─────────────────────────────
+  // Completely separate listener. Fires ONLY for @s.whatsapp.net remoteJids.
+  // Status broadcasts, groups, and bot-sent messages are all ignored inside
+  // handleDirectMessageUpsert before any DB or email operation is attempted.
+  sock.ev.on('messages.upsert', async ({ messages: msgs, type }) => {
+    if (type !== 'notify') return;
+    await handleDirectMessageUpsert(msgs);
   });
 
   console.log('✅ [WA]: Baileys socket initialized. All event listeners active.');
