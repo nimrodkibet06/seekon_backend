@@ -278,7 +278,7 @@ export const initWhatsAppClient = async () => {
 
       const author = msg.author || msg.from;
 
-      // 3. Try to resolve the real phone number from the contact (fixes @lid issues)
+      // 3. Resolve the sender's real phone number via getContact() (may fail for @lid statuses)
       let senderPhone = '';
       try {
         const contact = await msg.getContact();
@@ -286,13 +286,10 @@ export const initWhatsAppClient = async () => {
           senderPhone = String(contact.number).replace(/\D/g, '');
         }
       } catch (err) {
-        console.warn('⚠️ [WHATSAPP STATUS]: Failed to get contact details:', err.message);
+        console.warn('⚠️ [WHATSAPP STATUS]: getContact() failed:', err.message);
       }
 
-      // Also extract bare digits from the LID/JID itself as a fallback
-      const authorDigits = author.replace(/[^0-9]/g, '');
-
-      console.log(`📱 [WHATSAPP STATUS]: Author JID=${author} | Resolved phone=${senderPhone || '(none)'} | LID digits=${authorDigits}`);
+      console.log(`📱 [WHATSAPP STATUS]: Author JID=${author} | Resolved phone=${senderPhone || '(none)'}`);
 
       // 4. Check if this is the bot's own account (self-post auto-authorized)
       const isSelf = client.info && client.info.wid &&
@@ -304,26 +301,45 @@ export const initWhatsAppClient = async () => {
         console.log(`✅ [WHATSAPP STATUS]: Author is the bot's own account (${author}). Auto-authorizing!`);
       }
 
-      // 5. Match against stored authorized phones using multiple strategies:
-      //    a) Exact match on resolved phone
-      //    b) Suffix match — last N digits (handles country-code variations)
-      //    c) Suffix match on LID digits (resolves LID ↔ real-number mapping)
-      const SUFFIX_LEN = 9; // last 9 digits are typically unique per subscriber
-      const senderSuffix = (senderPhone || authorDigits).slice(-SUFFIX_LEN);
+      // 5. Resolve each stored phone → Contact → LID via client.getContactById().
+      //    WhatsApp multi-device statuses use @lid (a completely different number from the
+      //    real phone), so suffix/digit matching cannot work. The only reliable bridge is
+      //    asking the WhatsApp engine itself to resolve the phone's LID.
+      let isAuthorized = isSelf;
 
-      const isAuthorized = isSelf || rawAuthorizedPhones.some(adminPhone => {
-        if (!adminPhone) return false;
-        const adminSuffix = adminPhone.slice(-SUFFIX_LEN);
-        return (
-          senderPhone === adminPhone ||
-          authorDigits === adminPhone ||
-          senderSuffix === adminSuffix ||
-          author.includes(adminPhone)
-        );
-      });
+      if (!isAuthorized && rawAuthorizedPhones.length > 0) {
+        for (const adminPhone of rawAuthorizedPhones) {
+          try {
+            // a) Direct phone match (works when getContact() succeeded above)
+            if (senderPhone && senderPhone === adminPhone) {
+              console.log(`✅ [WHATSAPP STATUS]: Authorized by direct phone match (${adminPhone})`);
+              isAuthorized = true;
+              break;
+            }
+
+            // b) Resolve stored phone → Contact → get their actual LID
+            const adminContact = await client.getContactById(`${adminPhone}@c.us`);
+            if (adminContact) {
+              const adminLid = adminContact.id?._serialized || '';
+              console.log(`🔍 [WHATSAPP STATUS]: ${adminPhone} resolved to LID=${adminLid}`);
+
+              if (
+                author === `${adminPhone}@c.us` ||
+                (adminLid && author === adminLid)
+              ) {
+                console.log(`✅ [WHATSAPP STATUS]: Authorized! ${author} matches ${adminPhone} (LID: ${adminLid})`);
+                isAuthorized = true;
+                break;
+              }
+            }
+          } catch (resolveErr) {
+            console.warn(`⚠️ [WHATSAPP STATUS]: Could not resolve LID for ${adminPhone}:`, resolveErr.message);
+          }
+        }
+      }
 
       if (!isAuthorized) {
-        console.log(`❌ [WHATSAPP STATUS]: Author ${author} (Phone: ${senderPhone}, Suffix: ${senderSuffix}) is not an authorized admin. Skipping.`);
+        console.log(`❌ [WHATSAPP STATUS]: Author ${author} (Phone: ${senderPhone || 'unknown'}) is not an authorized admin. Skipping.`);
         return;
       }
 
