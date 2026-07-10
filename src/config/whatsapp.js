@@ -228,12 +228,25 @@ export const initWhatsAppClient = async () => {
   // 'message_create' → messages/statuses posted BY the bot itself
   //                    (used for the automated self-test trigger).
   // ─────────────────────────────────────────────────────────────────
+  // Dedup set: prevents double-processing when both events fire for
+  // the same status (message fires once, message_create fires once).
+  const recentlyProcessed = new Set();
+
   const handleStatusUpdate = async (msg) => {
     try {
       // 1. Only process status broadcast messages
       if (msg.from !== 'status@broadcast') {
         return;
       }
+
+      // Dedup: build a fingerprint from author + timestamp
+      const msgKey = `${msg.author || msg.from}_${msg.timestamp || Date.now()}`;
+      if (recentlyProcessed.has(msgKey)) {
+        return; // already being handled by the other event
+      }
+      recentlyProcessed.add(msgKey);
+      // Auto-expire dedup key after 10 seconds
+      setTimeout(() => recentlyProcessed.delete(msgKey), 10000);
 
       console.log(`📱 [WHATSAPP STATUS INTERCEPTED]: New status update from ${msg.author || msg.from}`);
 
