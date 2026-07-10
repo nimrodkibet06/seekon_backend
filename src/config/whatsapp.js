@@ -276,68 +276,57 @@ export const initWhatsAppClient = async () => {
           .forEach(n => rawAuthorizedPhones.push(n));
       }
 
-      const author = msg.author || msg.from;
-
-      // 3. Resolve LID -> real phone number.
-      //    CORRECT direction: call client.getContactById(authorLID) to get
-      //    the contact whose LID is the author. That contact has .number = real phone.
-      //    e.g. getContactById('279216193032354@lid') -> contact.number = '254726912849'
-      let senderPhone = '';
-      const authorDigitsOnly = author.replace(/[^0-9]/g, '');
+      // 3. Load authorized LIDs from DB (stored alongside phone numbers)
+      const authorizedLids = [];
       try {
-        const contactByLid = await client.getContactById(author);
-        if (contactByLid && contactByLid.number) {
-          const num = String(contactByLid.number).replace(/\D/g, '');
-          // Only use if it resolved to a DIFFERENT number (real phone, not LID digits)
-          if (num && num !== authorDigitsOnly) {
-            senderPhone = num;
-            console.log(`✅ [WHATSAPP STATUS]: LID ${author} -> real phone ${senderPhone}`);
-          }
+        const lidSetting = await Setting.findOne({ key: 'authorized_status_lids' });
+        if (lidSetting && lidSetting.value && Array.isArray(lidSetting.value.lids)) {
+          lidSetting.value.lids.forEach(lid => {
+            const clean = String(lid).trim();
+            if (clean) authorizedLids.push(clean.includes('@lid') ? clean : `${clean}@lid`);
+          });
         }
-      } catch (lidErr) {
-        console.warn(`⚠️ [WHATSAPP STATUS]: getContactById(${author}) failed:`, lidErr.message);
-      }
+      } catch (e) { /* silent */ }
 
-      // Fallback: try msg.getContact()
-      if (!senderPhone) {
-        try {
-          const contact = await msg.getContact();
-          if (contact && contact.number) {
-            const num = String(contact.number).replace(/\D/g, '');
-            if (num && num !== authorDigitsOnly) {
-              senderPhone = num;
-              console.log(`✅ [WHATSAPP STATUS]: Phone from msg.getContact(): ${senderPhone}`);
-            }
-          }
-        } catch (err2) { /* silent */ }
-      }
-
-      console.log(`📱 [WHATSAPP STATUS]: Author=${author} | Real phone=${senderPhone || '(unresolved)'}`);
+      console.log(`📱 [WHATSAPP STATUS]: Author=${author} | Stored LIDs: [${authorizedLids.join(', ')}]`);
 
       // 4. Check if this is the bot's own account (self-post auto-authorized)
       const isSelf = client.info && client.info.wid &&
         (author === client.info.wid._serialized ||
-         author.includes(client.info.wid.user) ||
-         (senderPhone && senderPhone === String(client.info.wid.user).replace(/\D/g, '')));
+         author.includes(client.info.wid.user));
 
       if (isSelf) {
         console.log(`✅ [WHATSAPP STATUS]: Author is the bot's own account (${author}). Auto-authorizing!`);
       }
 
-      // 5. Compare resolved real phone against stored authorized phones
-      const isAuthorized = isSelf || (!!senderPhone && rawAuthorizedPhones.some(adminPhone => {
-        if (!adminPhone) return false;
-        const sp = String(senderPhone).replace(/\D/g, '');
-        const ap = String(adminPhone).replace(/\D/g, '');
-        // Exact match OR trailing 9-digit suffix match (handles 07xx vs 2547xx)
-        return sp === ap || sp.slice(-9) === ap.slice(-9);
-      }));
+      // 5. Authorization check:
+      //    a) Self (bot's own account)
+      //    b) Author LID is in the stored authorized LIDs list
+      //    c) Author @c.us JID matches a stored phone number
+      const authorLidClean = author.replace('@lid', '').replace('@c.us', '');
+      const isAuthorized = isSelf ||
+        authorizedLids.some(lid => lid === author || lid.replace('@lid','') === authorLidClean) ||
+        rawAuthorizedPhones.some(phone => {
+          const p = String(phone).replace(/\D/g, '');
+          return author === `${p}@c.us` || author.includes(p);
+        });
 
       if (!isAuthorized) {
-        console.log(`❌ [WHATSAPP STATUS]: ${author} | phone=${senderPhone || 'unresolved'} | NOT in [${rawAuthorizedPhones.join(', ')}]. Skipping.`);
+        console.log(`❌ [WHATSAPP STATUS]: ${author} NOT authorized. Phones=[${rawAuthorizedPhones.join(',')}] LIDs=[${authorizedLids.join(',')}]`);
+        // Auto-save this LID to pending list so admin can approve it from the admin panel
+        if (author.includes('@lid')) {
+          try {
+            await Setting.findOneAndUpdate(
+              { key: 'pending_status_lids' },
+              { $addToSet: { 'value.lids': author }, $set: { updatedAt: Date.now() } },
+              { upsert: true }
+            );
+            console.log(`📌 [WHATSAPP STATUS]: LID ${author} saved to pending_status_lids for admin review.`);
+          } catch (e) { /* silent */ }
+        }
         return;
       }
-      console.log(`✅ [WHATSAPP STATUS]: ${author} authorized (phone: ${senderPhone}). Processing...`);
+      console.log(`✅ [WHATSAPP STATUS]: ${author} authorized. Processing...`);
 
       // 3. Escape hatch: If body contains predefined ignore character (e.g. '.'), skip.
       if (msg.body && msg.body.includes('.')) {

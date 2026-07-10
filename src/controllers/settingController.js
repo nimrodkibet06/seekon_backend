@@ -229,6 +229,62 @@ export const updateAuthorizedPhones = async (req, res) => {
   }
 };
 
+// Get pending LIDs that need admin approval (Admin only)
+export const getPendingLids = async (req, res) => {
+  try {
+    const [pendingSetting, approvedSetting] = await Promise.all([
+      Setting.findOne({ key: 'pending_status_lids' }),
+      Setting.findOne({ key: 'authorized_status_lids' })
+    ]);
+    const pending = pendingSetting?.value?.lids || [];
+    const approved = approvedSetting?.value?.lids || [];
+    res.status(200).json({ success: true, pending, approved });
+  } catch (error) {
+    res.status(500).json({ message: 'Error fetching LIDs', error: error.message });
+  }
+};
+
+// Approve a pending LID — moves it from pending to authorized (Admin only)
+export const approveLid = async (req, res) => {
+  try {
+    const { lid } = req.body;
+    if (!lid) return res.status(400).json({ message: 'lid is required' });
+    const cleanLid = String(lid).trim();
+    const fullLid = cleanLid.includes('@lid') ? cleanLid : `${cleanLid}@lid`;
+
+    // Add to authorized list
+    await Setting.findOneAndUpdate(
+      { key: 'authorized_status_lids' },
+      { $addToSet: { 'value.lids': fullLid }, $set: { updatedAt: Date.now() } },
+      { upsert: true }
+    );
+    // Remove from pending list
+    await Setting.findOneAndUpdate(
+      { key: 'pending_status_lids' },
+      { $pull: { 'value.lids': fullLid } }
+    );
+    res.status(200).json({ success: true, message: `LID ${fullLid} approved.` });
+  } catch (error) {
+    res.status(500).json({ message: 'Error approving LID', error: error.message });
+  }
+};
+
+// Remove an approved LID (Admin only)
+export const removeLid = async (req, res) => {
+  try {
+    const { lid } = req.body;
+    if (!lid) return res.status(400).json({ message: 'lid is required' });
+    const fullLid = String(lid).trim().includes('@lid') ? String(lid).trim() : `${String(lid).trim()}@lid`;
+    await Setting.findOneAndUpdate(
+      { key: 'authorized_status_lids' },
+      { $pull: { 'value.lids': fullLid } }
+    );
+    res.status(200).json({ success: true, message: `LID ${fullLid} removed.` });
+  } catch (error) {
+    res.status(500).json({ message: 'Error removing LID', error: error.message });
+  }
+};
+
 // Trigger automated self-status broadcast (Admin only)
 export const triggerSelfStatus = async (req, res) => {
   try {
