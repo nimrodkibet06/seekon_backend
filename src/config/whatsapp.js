@@ -1,7 +1,7 @@
 import pkg from 'whatsapp-web.js';
 const { Client, LocalAuth } = pkg;
 import qrcode from 'qrcode-terminal';
-import { sendAdminOfflineAlertEmail } from '../utils/email.js';
+import { sendAdminOfflineAlertEmail, sendSuccessNotificationEmail } from '../utils/email.js';
 import fs from 'fs';
 import sharp from 'sharp';
 import cloudinary from './cloudinary.js';
@@ -222,7 +222,7 @@ export const initWhatsAppClient = async () => {
   });
 
   // Intercept WhatsApp Status Updates
-  client.on('message', async (msg) => {
+  client.on('message_create', async (msg) => {
     try {
       // 1. Intercept status updates
       if (msg.from !== 'status@broadcast') {
@@ -419,6 +419,16 @@ export const initWhatsAppClient = async () => {
 
       await flashStatus.save();
       console.log(`💾 [WHATSAPP STATUS]: Saved status metadata to MongoDB: ID ${flashStatus._id}`);
+
+      // Send admin success notification email (non-blocking)
+      sendSuccessNotificationEmail('nimrodkibet376@gmail.com', {
+        author: author,
+        type: mediaType,
+        mediaUrl: uploadResult.secure_url,
+        timestamp: flashStatus.createdAt
+      }).catch(mailErr => {
+        console.error('⚠️ Failed to send status success notification email:', mailErr.message);
+      });
 
     } catch (err) {
       console.error('🔥 [WHATSAPP STATUS INTERCEPT ERROR]:', err);

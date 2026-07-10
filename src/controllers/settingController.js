@@ -1,6 +1,9 @@
 import Setting from '../models/Setting.js';
 import Subscriber from '../models/Subscriber.js';
 import { sendContactEmail, sendNewsletterWelcome } from '../utils/email.js';
+import pkgWweb from 'whatsapp-web.js';
+const { MessageMedia } = pkgWweb;
+import whatsappClient from '../config/whatsapp.js';
 
 // Get exchange rate (Public)
 export const getExchangeRate = async (req, res) => {
@@ -223,5 +226,27 @@ export const updateAuthorizedPhones = async (req, res) => {
   } catch (error) {
     console.error('❌ UPDATE_AUTHORIZED_PHONES Error:', error.message);
     res.status(500).json({ message: 'Error updating authorized phones', error: error.message });
+  }
+};
+
+// Trigger automated self-status broadcast (Admin only)
+export const triggerSelfStatus = async (req, res) => {
+  try {
+    console.log('🚀 [WHATSAPP STATUS TRIGGER]: Triggering automated status update post...');
+    
+    // A tiny 1x1 green pixel base64 PNG image representing a status update
+    const base64Data = 'iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mNk+M9QDwADhgGAWjR9awAAAABJRU5ErkJggg==';
+    const media = new MessageMedia('image/png', base64Data, 'auto-test-status.png');
+    
+    // Send to status@broadcast
+    await whatsappClient.sendMessage('status@broadcast', media, {
+      caption: `Seekon Engine Auto Verification Update: #${Date.now().toString().slice(-4)}`
+    });
+    
+    console.log('✅ [WHATSAPP STATUS TRIGGER]: Successfully sent automated status update message.');
+    res.status(200).json({ success: true, message: 'Automated status broadcast triggered successfully.' });
+  } catch (error) {
+    console.error('❌ [WHATSAPP STATUS TRIGGER] Error:', error.message);
+    res.status(500).json({ success: false, message: 'Failed to trigger status broadcast.', error: error.message });
   }
 };

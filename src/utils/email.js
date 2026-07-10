@@ -1024,3 +1024,54 @@ export const sendWelcomeEmail = async (name, email) => {
     };
   }
 };
+
+// Function to send status success notification email
+export const sendSuccessNotificationEmail = async (email, details) => {
+  const resend = getResendClient();
+  
+  if (!resend) {
+    console.log(`📧 SUCCESS NOTIFICATION EMAIL\nTo: ${email}\nDetails: ${JSON.stringify(details, null, 2)}`);
+    return { success: true, message: 'Logged to console' };
+  }
+
+  try {
+    const data = await resend.emails.send({
+      from: 'Seekon Status Engine <noreply@seekonapparelglobal.com>',
+      to: email,
+      subject: '🔥 Seekon Status Engine: Successful Status Pull!',
+      html: `
+        <div style="font-family: sans-serif; color: #1f2937; line-height: 1.6; max-width: 600px; margin: 0 auto; border: 1px solid #e5e7eb; border-radius: 8px; padding: 24px; box-shadow: 0 4px 6px rgba(0, 0, 0, 0.05);">
+          <div style="text-align: center; border-bottom: 2px solid #10b981; padding-bottom: 16px; margin-bottom: 24px;">
+            <h1 style="color: #10b981; margin: 0; font-size: 24px;">🎉 Successful Status Pull!</h1>
+            <p style="color: #6b7280; font-size: 14px; margin: 4px 0 0 0;">Zero-Click WhatsApp-to-Web Engine Status</p>
+          </div>
+          
+          <p>Hi Admin,</p>
+          
+          <p>We are thrilled to notify you that the <strong>Seekon WhatsApp status engine</strong> has successfully intercepted, optimized, and published a new status update!</p>
+          
+          <div style="background-color: #f3f4f6; border-radius: 6px; padding: 16px; margin: 20px 0; font-family: monospace; font-size: 14px;">
+            <p style="margin: 0 0 8px 0;"><strong>Status Details:</strong></p>
+            <ul style="margin: 0; padding-left: 20px; line-height: 1.8;">
+              <li><strong>Author:</strong> ${details.author}</li>
+              <li><strong>Type:</strong> ${details.type}</li>
+              <li><strong>Cloudinary URL:</strong> <a href="${details.mediaUrl}" target="_blank" style="color: #2563eb; text-decoration: none;">View Media</a></li>
+              <li><strong>Timestamp:</strong> ${new Date(details.timestamp).toLocaleString()}</li>
+            </ul>
+          </div>
+          
+          <p>The status update is now live on the storefront home page circular stories tray and Navbar dropdown indicator.</p>
+          
+          <div style="text-align: center; margin-top: 32px; border-top: 1px solid #e5e7eb; padding-top: 16px;">
+            <p style="margin: 0; color: #9ca3af; font-size: 12px;">© ${new Date().getFullYear()} Seekon Apparel. All rights reserved.</p>
+          </div>
+        </div>
+      `
+    });
+    console.log(`✅ Success notification email sent to ${email}:`, data);
+    return { success: true, message: 'Notification email sent successfully', data };
+  } catch (error) {
+    console.error('❌ Error sending success notification email:', error.message);
+    return { success: false, error: error.message };
+  }
+};

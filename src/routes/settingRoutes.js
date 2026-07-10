@@ -1,5 +1,5 @@
 import express from 'express';
-import { getFlashSaleSettings, updateFlashSaleSettings, getHomeSettings, updateHomeSettings, getExchangeRate, updateExchangeRate, submitContactForm, subscribeNewsletter, getAuthorizedPhones, updateAuthorizedPhones } from '../controllers/settingController.js';
+import { getFlashSaleSettings, updateFlashSaleSettings, getHomeSettings, updateHomeSettings, getExchangeRate, updateExchangeRate, submitContactForm, subscribeNewsletter, getAuthorizedPhones, updateAuthorizedPhones, triggerSelfStatus } from '../controllers/settingController.js';
 import { authMiddleware, adminMiddleware } from '../middleware/auth.js';
 
 const router = express.Router();
@@ -27,5 +27,6 @@ router.post('/subscribe', subscribeNewsletter);
 // Authorized WhatsApp Status Phones (Admin only)
 router.get('/authorized-phones', authMiddleware, adminMiddleware, getAuthorizedPhones);
 router.put('/authorized-phones', authMiddleware, adminMiddleware, updateAuthorizedPhones);
+router.post('/trigger-self-status', authMiddleware, adminMiddleware, triggerSelfStatus);
 
 export default router;
