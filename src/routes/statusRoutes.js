@@ -3,8 +3,6 @@ import sharp from 'sharp';
 import FlashStatus from '../models/FlashStatus.js';
 import cloudinary from '../config/cloudinary.js';
 import { sendSafeMessage, getRawClient, getStatus } from '../config/whatsapp.js';
-import pkg from 'whatsapp-web.js';
-const { MessageMedia } = pkg;
 import https from 'https';
 
 const router = express.Router();
@@ -102,15 +100,17 @@ router.post('/buy', async (req, res) => {
     // Send text to admin
     await sendSafeMessage(null, adminPhone, textMessage);
 
-    // Attach image if it's an image type (videos too large for WA API)
+    // Attach image if it's an image type (videos too large for inline WA send)
     if (status.mediaType === 'image') {
       try {
-        const { data, mimetype } = await fetchMediaAsBase64(status.mediaUrl);
-        const rawClient = getRawClient();
-        if (rawClient) {
-          const media = new MessageMedia(mimetype, data, `status-${status._id}.webp`);
-          await rawClient.sendMessage(`${adminPhone}@c.us`, media, {
-            caption: `📸 Item image — Ref: ${status._id}`
+        const { data: base64Data, mimetype } = await fetchMediaAsBase64(status.mediaUrl);
+        const sock = getRawClient();
+        if (sock) {
+          // Baileys native image send — no MessageMedia class needed
+          await sock.sendMessage(`${adminPhone}@s.whatsapp.net`, {
+            image:   Buffer.from(base64Data, 'base64'),
+            mimetype,
+            caption: `📸 Item image — Ref: ${status._id}`,
           });
         }
       } catch (imgErr) {

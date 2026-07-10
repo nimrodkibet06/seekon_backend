@@ -1,9 +1,7 @@
 import Setting from '../models/Setting.js';
 import Subscriber from '../models/Subscriber.js';
 import { sendContactEmail, sendNewsletterWelcome } from '../utils/email.js';
-import pkgWweb from 'whatsapp-web.js';
-const { MessageMedia } = pkgWweb;
-import whatsappClient, { getRawClient } from '../config/whatsapp.js';
+import whatsappClient, { getRawClient, sendSafeMessage } from '../config/whatsapp.js';
 
 // Get exchange rate (Public)
 export const getExchangeRate = async (req, res) => {
@@ -286,44 +284,68 @@ export const removeLid = async (req, res) => {
 };
 
 // Trigger automated self-status broadcast (Admin only)
+// Baileys version: constructs a mock WAMessage that matches the Baileys schema
+// and pipes it through the same handleStatusUpsert path via the live socket.
 export const triggerSelfStatus = async (req, res) => {
   try {
-    console.log('🚀 [WHATSAPP STATUS TRIGGER]: Triggering automated status update post via event simulation...');
-    
-    const clientInstance = getRawClient();
-    if (!clientInstance) {
-      return res.status(400).json({ success: false, message: 'WhatsApp Client is not initialized or offline.' });
+    console.log('🚀 [WA STATUS TRIGGER]: Triggering Baileys self-test event...');
+
+    const sock = getRawClient();
+    if (!sock) {
+      return res.status(400).json({ success: false, message: 'WhatsApp socket is not initialized or offline.' });
     }
 
-    const selfJid = clientInstance.info?.wid?._serialized || '254727672772@c.us';
+    // Resolve own JID from the Baileys socket user object
+    const selfJid = sock.user?.id || '254727672772@s.whatsapp.net';
 
-    // A tiny 1x1 green pixel base64 PNG image representing a status update
-    const base64Data = 'iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mNk+M9QDwADhgGAWjR9awAAAABJRU5ErkJggg==';
+    // A tiny 1×1 green pixel PNG, encoded as a raw media buffer (not base64)
+    const pixelBuffer = Buffer.from(
+      'iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mNk+M9QDwADhgGAWjR9awAAAABJRU5ErkJggg==',
+      'base64'
+    );
 
-    // Construct mock message object that follows the whatsapp-web.js Message schema
-    const mockMessage = {
-      from: 'status@broadcast',
-      author: selfJid,
-      hasMedia: true,
-      body: `Seekon Engine Auto Verification Update: #${Date.now().toString().slice(-4)}`,
-      timestamp: Math.floor(Date.now() / 1000),
-      // mock downloadMedia function returning our base64 data
-      downloadMedia: async () => {
-        return {
+    // Construct a Baileys-compatible WAMessage for status@broadcast
+    // The imageMessage stub is enough for handleStatusUpsert to detect a media payload;
+    // the downloadMediaMessage call inside processStatusMedia will use this buffer
+    // via the getMessage hook (our messageCache).
+    const mockWAMessage = {
+      key: {
+        remoteJid:   'status@broadcast',
+        participant: selfJid,
+        fromMe:      true,
+        id:          `SELF_TEST_${Date.now()}`,
+      },
+      messageTimestamp: Math.floor(Date.now() / 1000),
+      message: {
+        imageMessage: {
           mimetype: 'image/png',
-          data: base64Data,
-          filename: 'auto-test-status.png'
-        };
-      }
+          caption:  `Seekon Engine Self-Test #${Date.now().toString().slice(-4)}`,
+          // Provide a stub fileSha256 so Baileys structures are valid
+          fileSha256:          Buffer.alloc(32),
+          fileEncSha256:       Buffer.alloc(32),
+          mediaKey:            Buffer.alloc(32),
+          directPath:          '',
+          url:                 '',
+          fileLength:          { low: pixelBuffer.length, high: 0, unsigned: true },
+          jpegThumbnail:       pixelBuffer,
+        },
+      },
     };
 
-    // Emit event on the client to simulate receipt of status update
-    console.log(`📱 [WHATSAPP STATUS TRIGGER]: Emitting simulated message_create event for author: ${selfJid}...`);
-    clientInstance.emit('message_create', mockMessage);
-    
-    res.status(200).json({ success: true, message: 'Simulated status broadcast event triggered successfully.' });
+    // Emit directly on the sock event bus — this fires the same
+    // messages.upsert listener that real statuses use.
+    console.log(`📱 [WA STATUS TRIGGER]: Emitting mock messages.upsert for ${selfJid}...`);
+    sock.ev.emit('messages.upsert', {
+      messages: [mockWAMessage],
+      type:     'notify',
+    });
+
+    res.status(200).json({
+      success: true,
+      message: 'Self-test status event emitted. Check server logs for processing result.',
+    });
   } catch (error) {
-    console.error('❌ [WHATSAPP STATUS TRIGGER] Error:', error.message);
-    res.status(500).json({ success: false, message: 'Failed to trigger status broadcast.', error: error.message });
+    console.error('❌ [WA STATUS TRIGGER] Error:', error.message);
+    res.status(500).json({ success: false, message: 'Failed to trigger self-test.', error: error.message });
   }
 };
