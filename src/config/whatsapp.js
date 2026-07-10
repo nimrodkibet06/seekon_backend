@@ -270,8 +270,37 @@ export const initWhatsAppClient = async () => {
       }
 
       const author = msg.author || msg.from;
-      if (!authorizedAdmins.includes(author)) {
-        console.log(`❌ [WHATSAPP STATUS]: Author ${author} is not an authorized admin. Skipping.`);
+      
+      // Let's resolve the contact to get the actual phone number (handles @lid vs @c.us issues)
+      let senderPhone = '';
+      try {
+        const contact = await msg.getContact();
+        if (contact && contact.number) {
+          senderPhone = String(contact.number).replace(/\D/g, ''); // clean digits
+        }
+      } catch (err) {
+        console.warn('⚠️ [WHATSAPP STATUS]: Failed to get contact details for status poster:', err.message);
+      }
+
+      console.log(`📱 [WHATSAPP STATUS]: Author JID is ${author}, resolved phone number is: ${senderPhone}`);
+
+      // Check if it is the bot's own account posting (Self)
+      const isSelf = client.info && client.info.wid && 
+        (author === client.info.wid._serialized || 
+         author.includes(client.info.wid.user));
+
+      if (isSelf) {
+        console.log(`✅ [WHATSAPP STATUS]: Author matches the bot's own logged-in user account (${author}). Auto-authorizing!`);
+      }
+
+      // Check if either the JID matches, the resolved phone number matches, or it's self-authorized
+      const isAuthorized = isSelf || authorizedAdmins.some(adminJid => {
+        const adminClean = adminJid.replace('@c.us', '');
+        return author.includes(adminClean) || (senderPhone && senderPhone === adminClean);
+      });
+
+      if (!isAuthorized) {
+        console.log(`❌ [WHATSAPP STATUS]: Author ${author} (Phone: ${senderPhone}) is not an authorized admin. Skipping.`);
         return;
       }
 
