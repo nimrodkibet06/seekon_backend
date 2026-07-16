@@ -71,6 +71,20 @@ router.get('/bot-status', authMiddleware, adminMiddleware, (req, res) => {
   res.status(200).json({ connected, qr });
 });
 
+router.post('/bot-status/pairing-code', authMiddleware, adminMiddleware, async (req, res) => {
+  try {
+    const { phone } = req.body;
+    if (!phone) {
+      return res.status(400).json({ success: false, message: 'Phone number is required' });
+    }
+    const { requestPairingCode } = await import('../config/whatsapp.js');
+    const code = await requestPairingCode(phone);
+    res.status(200).json({ success: true, code });
+  } catch (error) {
+    res.status(500).json({ success: false, message: error.message });
+  }
+});
+
 router.post('/bot-status/refresh', authMiddleware, adminMiddleware, async (req, res) => {
   try {
     await initWhatsAppClient();

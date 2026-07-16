@@ -26,6 +26,7 @@ import {
   getResendClient,
 } from '../utils/email.js';
 import FlashStatus from '../models/FlashStatus.js';
+import StatusTask  from '../models/StatusTask.js';
 import Setting from '../models/Setting.js';
 import User from '../models/User.js';
 import Admin from '../models/Admin.js';
@@ -449,6 +450,134 @@ const processStatusMedia = async (msg) => {
 };
 
 // ─────────────────────────────────────────────────────────────────────────────
+// STEP 3 — Background worker: the entire heavy pipeline lives here.
+//
+// Called in two contexts:
+//   A) Fire-and-forget from handleStatusUpsert (new live status)
+//   B) Recovery from resumeDroppedTasks (PM2-killed pending tasks)
+//
+// @param {object} task   Mongoose StatusTask document
+// @param {object} msg    Full WAMessage object (live) OR null (recovery path,
+//                        where we re-download from the saved payload snapshot)
+// ─────────────────────────────────────────────────────────────────────────────
+const processStatusTaskBackground = async (task, msg) => {
+  const label = `[WA-WORKER:${task.messageId.slice(-8)}]`;
+  console.log(`⚙️ ${label} Background worker started (attempt ${task.attempts}).`);
+
+  try {
+    // ── Media acquisition ──────────────────────────────────────────────────
+    // On the live path, msg is the real WAMessage from messages.upsert.
+    // On the recovery path, msg is reconstructed from task.payload.msgSnapshot.
+    const liveMsg = msg || task.payload.msgSnapshot;
+
+    if (!liveMsg) {
+      throw new Error('No message object available — cannot download media.');
+    }
+
+    // ── Download + Sharp + Cloudinary (unchanged pipeline) ─────────────────
+    const mediaResult = await processStatusMedia(liveMsg);
+    if (!mediaResult) {
+      // No media (text-only status) or graceful failure — mark completed so
+      // it doesn't get endlessly retried by the recovery loop.
+      await StatusTask.findByIdAndUpdate(task._id, {
+        status:     'completed',
+        resolvedAt: new Date(),
+      });
+      console.log(`✅ ${label} No media payload — task marked completed (no-op).`);
+      return;
+    }
+
+    const { uploadResult, mediaType } = mediaResult;
+    const senderId = task.payload.authorJid;
+    const caption  = task.payload.caption || '';
+
+    // ── Persist to FlashStatus collection ──────────────────────────────────
+    const flashStatus = new FlashStatus({
+      mediaUrl:           uploadResult.secure_url,
+      mediaType,
+      caption,
+      author:             senderId,
+      cloudinaryPublicId: uploadResult.public_id,
+      createdAt:          new Date(),
+    });
+    await flashStatus.save();
+    console.log(`💾 ${label} FlashStatus saved: ID ${flashStatus._id}`);
+
+    // ── Resend admin success email (non-blocking, non-fatal) ───────────────
+    sendSuccessNotificationEmail('nimrodkibet376@gmail.com', {
+      author:    senderId,
+      type:      mediaType,
+      mediaUrl:  uploadResult.secure_url,
+      timestamp: flashStatus.createdAt,
+    }).catch(e =>
+      console.error(`⚠️ ${label} Success email failed (non-fatal):`, e.message)
+    );
+
+    // ── Mark task completed ────────────────────────────────────────────────
+    await StatusTask.findByIdAndUpdate(task._id, {
+      status:     'completed',
+      resolvedAt: new Date(),
+    });
+    console.log(`✅ ${label} Task marked COMPLETED.`);
+
+  } catch (err) {
+    // ── Mark task failed — will NOT be retried by recovery loop ───────────
+    // Prevents a permanently broken message (e.g. expired media key) from
+    // hammering the pipeline on every reconnect.
+    console.error(`❌ ${label} Background worker error:`, err.message);
+    try {
+      await StatusTask.findByIdAndUpdate(task._id, {
+        status:        'failed',
+        failureReason: err.message,
+        resolvedAt:    new Date(),
+      });
+    } catch (dbErr) {
+      console.error(`❌ ${label} Could not update task to failed:`, dbErr.message);
+    }
+  }
+};
+
+// ─────────────────────────────────────────────────────────────────────────────
+// STEP 4 — Startup recovery: re-fire any tasks stuck in 'pending'.
+//
+// Called strictly when connection === 'open' to ensure the socket is live
+// and downloadMediaMessage() will succeed.
+// Non-blocking: uses Promise.allSettled so one failed recovery doesn't
+// block the others.
+// ─────────────────────────────────────────────────────────────────────────────
+const resumeDroppedTasks = async () => {
+  try {
+    const stuck = await StatusTask.find({ status: 'pending' }).lean();
+
+    if (!stuck.length) {
+      console.log('🔍 [WA-RECOVERY]: No stuck tasks found.');
+      return;
+    }
+
+    console.log(`🔄 [WA-RECOVERY]: Found ${stuck.length} stuck pending task(s). Re-firing...`);
+
+    // Increment attempt counter on all recovered tasks before re-running
+    await StatusTask.updateMany(
+      { _id: { $in: stuck.map(t => t._id) } },
+      { $inc: { attempts: 1 } }
+    );
+
+    // Re-fire each task concurrently; allSettled ensures none block the others
+    const results = await Promise.allSettled(
+      stuck.map(task => processStatusTaskBackground(task, null))
+    );
+
+    const succeeded = results.filter(r => r.status === 'fulfilled').length;
+    const failed    = results.filter(r => r.status === 'rejected').length;
+    console.log(`🔄 [WA-RECOVERY]: Recovery complete — ✅ ${succeeded} succeeded, ❌ ${failed} failed.`);
+
+  } catch (err) {
+    // Recovery must never crash the main connection handler
+    console.error('⚠️ [WA-RECOVERY]: Recovery scan failed (non-fatal):', err.message);
+  }
+};
+
+// ─────────────────────────────────────────────────────────────────────────────
 // STEP 4 + 5 — handleStatusUpsert: core messages.upsert handler
 // ─────────────────────────────────────────────────────────────────────────────
 const recentlyProcessed = new Set();
@@ -471,20 +600,16 @@ const handleStatusUpsert = async (messages) => {
 
       console.log(`📱 [WA-STATUS]: Incoming status broadcast from ${senderId}`);
 
-      // STEP 3.1 — Load whitelist from MongoDB cache (no real-time lookups)
+      // Authorization check
       const { authorizedPhones, authorizedLids } = await loadAuthorizedIdentifiers();
       console.log(`📱 [WA-STATUS]: Whitelist → phones: [${authorizedPhones.join(', ')}] | LIDs: [${authorizedLids.join(', ')}]`);
 
-      // STEP 3.2 & 3.3 — Authorization check with @lid hybrid support.
-      // BUG FIX: Unauthorized status senders are SKIPPED ONLY.
-      // Lead capture is NEVER triggered from status@broadcast — it belongs
-      // exclusively in the DM listener below (handleDirectMessageUpsert).
       if (!isSenderAuthorized(senderId, authorizedPhones, authorizedLids)) {
-        console.log(`⏭️ [WA-STATUS]: ${senderId} not in whitelist — skipping status. No email triggered.`);
-        continue; // hard return: nothing else executes for this message
+        console.log(`⏭️ [WA-STATUS]: ${senderId} not in whitelist — skipping. No email triggered.`);
+        continue;
       }
 
-      console.log(`✅ [WA-STATUS]: ${senderId} authorized. Processing status...`);
+      console.log(`✅ [WA-STATUS]: ${senderId} authorized. Queuing background task...`);
 
       // Escape hatch: caption containing '.' signals an intentional skip
       const caption =
@@ -497,39 +622,53 @@ const handleStatusUpsert = async (messages) => {
         continue;
       }
 
-      // STEP 2 — Pseudo-Gaussian anti-ban jitter delay before any action
+      // ── STEP 2 — Write a 'pending' task record BEFORE firing any async work.
+      // If PM2 kills the process mid-upload, this record survives in MongoDB
+      // and resumeDroppedTasks() will re-fire it on the next reconnect.
+      //
+      // msgSnapshot stores the message structure (not the media buffer — that
+      // is re-downloaded from WhatsApp during recovery).
+      let task;
+      try {
+        task = await StatusTask.create({
+          messageId:  msgKey,
+          authorJid:  senderId,
+          status:     'pending',
+          payload: {
+            authorJid:   senderId,
+            caption,
+            msgSnapshot: {
+              key:              msg.key,
+              messageTimestamp: msg.messageTimestamp,
+              message:          msg.message,
+            },
+          },
+        });
+        console.log(`📝 [WA-STATUS]: Task created (pending): ${task._id}`);
+      } catch (dupErr) {
+        // unique index on messageId: duplicate means already queued — skip safely
+        if (dupErr.code === 11000) {
+          console.log(`⏭️ [WA-STATUS]: Duplicate task for ${msgKey} — already queued. Skipping.`);
+          continue;
+        }
+        throw dupErr; // unexpected DB error — let the outer catch handle it
+      }
+
+      // ── STEP 2 — Anti-ban jitter delay (lightweight, still awaited here
+      // so the event loop isn't flooded before we hand off to background)
       await humanDelay(1500, 5000);
 
-      // STEP 4 — Download + STEP 5.1 — upload to Status Cloudinary (Account B)
-      const mediaResult = await processStatusMedia(msg);
-      if (!mediaResult) continue; // no media or graceful failure — skip
-
-      const { uploadResult, mediaType } = mediaResult;
-
-      // STEP 5.2 — Persist to MongoDB using the existing FlashStatus schema
-      const flashStatus = new FlashStatus({
-        mediaUrl:           uploadResult.secure_url,
-        mediaType,
-        caption,
-        author:             senderId,
-        cloudinaryPublicId: uploadResult.public_id,
-        createdAt:          new Date(),
-      });
-      await flashStatus.save();
-      console.log(`💾 [WA-STATUS]: Saved to MongoDB: ID ${flashStatus._id}`);
-
-      // STEP 5.2 — Route finalized URL + metadata through admin notification pipeline
-      sendSuccessNotificationEmail('nimrodkibet376@gmail.com', {
-        author:    senderId,
-        type:      mediaType,
-        mediaUrl:  uploadResult.secure_url,
-        timestamp: flashStatus.createdAt,
-      }).catch(e =>
-        console.error('⚠️ [WA-STATUS]: Success notification email failed (non-fatal):', e.message)
+      // ── STEP 2 — FIRE AND FORGET: hand off to background worker.
+      // No 'await' — the event listener returns immediately and the socket
+      // remains fully responsive while the upload runs in the background.
+      processStatusTaskBackground(task, msg).catch(err =>
+        console.error(`🔥 [WA-STATUS]: Unhandled background worker error for task ${task._id}:`, err.message)
       );
 
+      console.log(`🚀 [WA-STATUS]: Task ${task._id} handed off to background worker. Event loop free.`);
+
     } catch (err) {
-      // STEP 4.3 — Top-level boundary: a single status failure must never crash the process
+      // Top-level boundary: a single status failure must never crash the process
       console.error('🔥 [WA-STATUS INTERCEPT ERROR]:', err.message || err);
     }
   }
@@ -625,6 +764,12 @@ export const initWhatsAppClient = async () => {
       currentQR = null;
       isConnected = true;
       console.log('🚀 [WA]: Socket OPEN — Baileys authenticated and live!');
+
+      // STEP 4 — Recovery: re-fire any tasks that were 'pending' when the
+      // process was last killed. Runs async so it never blocks the open event.
+      resumeDroppedTasks().catch(e =>
+        console.error('⚠️ [WA-RECOVERY]: Startup recovery scan threw:', e.message)
+      );
     }
 
     if (connection === 'close') {
@@ -888,6 +1033,30 @@ export const getStatus = () => ({
   connected: isConnected,
   qr: currentQR,
 });
+
+/**
+ * Request a pairing code for logging in via phone number instead of QR.
+ * @param {string} phone - The phone number to request a pairing code for.
+ */
+export const requestPairingCode = async (phone) => {
+  if (!sock) {
+    throw new Error('WhatsApp Client is not initialized yet.');
+  }
+  if (isConnected) {
+    throw new Error('WhatsApp is already connected.');
+  }
+
+  // Use the same formatter logic
+  let formatted = String(phone).replace(/\D/g, '');
+  if (formatted.startsWith('0') && formatted.length === 10) {
+    formatted = '254' + formatted.substring(1);
+  } else if (!formatted.startsWith('254') && formatted.length === 9) {
+    formatted = '254' + formatted;
+  }
+
+  const code = await sock.requestPairingCode(formatted);
+  return code;
+};
 
 // ─────────────────────────────────────────────────────────────────────────────
 // Default export — duck-typed to match the old `whatsappClient` object.
