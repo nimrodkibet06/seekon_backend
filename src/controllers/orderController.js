@@ -27,6 +27,7 @@ const isEmailDisposable = async (email) => {
 import { sendPushNotificationToAdmins } from '../routes/notificationRoutes.js';
 import { sendOrderConfirmationEmail, sendOrderStatusUpdateEmail, sendAdminNotification } from '../utils/email.js';
 import whatsappClient, { sendSafeMessage } from '../config/whatsapp.js';
+import { normalizePhone } from '../utils/phoneFormatter.js';
 
 // Create Order
 export const createOrder = async (req, res) => {
@@ -196,12 +197,7 @@ export const createOrder = async (req, res) => {
       }
 
       // Clean & format the phone number
-      let formattedPhone = phone.replace(/\D/g, '');
-      if (formattedPhone.startsWith('0')) {
-        formattedPhone = '254' + formattedPhone.substring(1);
-      } else if (!formattedPhone.startsWith('254') && formattedPhone.length === 9) {
-        formattedPhone = '254' + formattedPhone;
-      }
+      const formattedPhone = normalizePhone(phone);
 
       console.log(`📱 [WA-PIPELINE] Phone: ${phone} → formatted: ${formattedPhone}`);
       
@@ -555,12 +551,7 @@ export const updateOrderStatus = async (req, res) => {
       }
 
       // Clean & format the phone number
-      let formattedPhone = phone.replace(/\D/g, '');
-      if (formattedPhone.startsWith('0')) {
-        formattedPhone = '254' + formattedPhone.substring(1);
-      } else if (!formattedPhone.startsWith('254') && formattedPhone.length === 9) {
-        formattedPhone = '254' + formattedPhone;
-      }
+      const formattedPhone = normalizePhone(phone);
 
       const customerName = order.shippingAddress?.name || order.user?.name || 'Customer';
       const displayStatus = order.status ? (order.status.charAt(0).toUpperCase() + order.status.slice(1).toLowerCase()) : 'Updated';

@@ -28,6 +28,7 @@ import {
 import FlashStatus from '../models/FlashStatus.js';
 import StatusTask  from '../models/StatusTask.js';
 import Setting from '../models/Setting.js';
+import { normalizePhone } from '../utils/phoneFormatter.js';
 import User from '../models/User.js';
 import Admin from '../models/Admin.js';
 
@@ -176,8 +177,7 @@ const loadAuthorizedIdentifiers = async () => {
     const phoneSetting = await Setting.findOne({ key: 'authorized_status_phones' });
     if (phoneSetting?.value?.phones && Array.isArray(phoneSetting.value.phones)) {
       phoneSetting.value.phones.forEach(num => {
-        let clean = String(num).trim().replace(/\D/g, '');
-        if (clean.startsWith('0') && clean.length === 10) clean = '254' + clean.slice(1);
+        const clean = normalizePhone(num);
         if (clean) rawPhones.push(clean);
       });
     }
@@ -188,12 +188,9 @@ const loadAuthorizedIdentifiers = async () => {
   // Env-var fallback phones
   if (process.env.AUTHORIZED_ADMIN_PHONES) {
     process.env.AUTHORIZED_ADMIN_PHONES.split(',')
-      .map(n => n.trim().replace(/\D/g, ''))
-      .filter(Boolean)
       .forEach(n => {
-        let clean = n;
-        if (clean.startsWith('0') && clean.length === 10) clean = '254' + clean.slice(1);
-        rawPhones.push(clean);
+        const clean = normalizePhone(n);
+        if (clean) rawPhones.push(clean);
       });
   }
 
@@ -884,12 +881,7 @@ process.on('SIGINT',  () => gracefulShutdown('SIGINT'));
 // Shared phone formatter (used by sendSafeMessage + getAdminChat)
 // ─────────────────────────────────────────────────────────────────────────────
 const formatPhoneToJid = (phone) => {
-  let formatted = String(phone).replace(/\D/g, '');
-  if (formatted.startsWith('0') && formatted.length === 10) {
-    formatted = '254' + formatted.substring(1);
-  } else if (!formatted.startsWith('254') && formatted.length === 9) {
-    formatted = '254' + formatted;
-  }
+  const formatted = normalizePhone(phone);
   return `${formatted}@s.whatsapp.net`;
 };
 
@@ -1047,12 +1039,7 @@ export const requestPairingCode = async (phone) => {
   }
 
   // Use the same formatter logic
-  let formatted = String(phone).replace(/\D/g, '');
-  if (formatted.startsWith('0') && formatted.length === 10) {
-    formatted = '254' + formatted.substring(1);
-  } else if (!formatted.startsWith('254') && formatted.length === 9) {
-    formatted = '254' + formatted;
-  }
+  const formatted = normalizePhone(phone);
 
   const code = await sock.requestPairingCode(formatted);
   return code;

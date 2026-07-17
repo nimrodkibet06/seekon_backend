@@ -8,6 +8,7 @@ import crypto from 'crypto';
 import axios from 'axios';
 import { validationResult } from 'express-validator';
 import { scheduleDebouncedBackup } from '../services/backupService.js';
+import { normalizePhone } from '../utils/phoneFormatter.js';
 
 // Helper function to decrement inventory on successful payment
 const decrementInventory = async (orderItems) => {
@@ -302,11 +303,8 @@ export const initiateSTKPush = async (req, res) => {
     const timestamp = new Date().toISOString().replace(/[^0-9]/g, '').slice(0, 14);
     const password = Buffer.from(`${shortCode}${passKey}${timestamp}`).toString('base64');
     
-    // Normalize phone number (must be 2547XXXXXXXX)
-    let formattedPhone = phoneNumber.replace(/[^0-9]/g, '');
-    if (formattedPhone.startsWith('0')) formattedPhone = '254' + formattedPhone.slice(1);
-    if (formattedPhone.startsWith('7') || formattedPhone.startsWith('1')) formattedPhone = '254' + formattedPhone;
-    if (formattedPhone.length < 12) formattedPhone = '254' + formattedPhone;
+    // Normalize phone number (must be 2547XXXXXXXX or 2541XXXXXXXX)
+    const formattedPhone = normalizePhone(phoneNumber);
 
     const stkPayload = {
       BusinessShortCode: shortCode,

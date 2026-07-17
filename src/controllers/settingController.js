@@ -2,6 +2,7 @@ import Setting from '../models/Setting.js';
 import Subscriber from '../models/Subscriber.js';
 import { sendContactEmail, sendNewsletterWelcome } from '../utils/email.js';
 import whatsappClient, { getRawClient, sendSafeMessage } from '../config/whatsapp.js';
+import { normalizePhone } from '../utils/phoneFormatter.js';
 
 // Get exchange rate (Public)
 export const getExchangeRate = async (req, res) => {
@@ -201,14 +202,8 @@ export const updateAuthorizedPhones = async (req, res) => {
 
     // Clean and validate numbers: remove non-digits, convert local format to international (254)
     const cleanedPhones = phones
-      .map(num => {
-        let clean = String(num).replace(/\D/g, '');
-        if (clean.startsWith('0') && clean.length === 10) {
-          clean = '254' + clean.slice(1);
-        }
-        return clean;
-      })
-      .filter(num => num.length >= 9);
+      .map(num => normalizePhone(num))
+      .filter(num => num && num.length >= 9);
 
     const settings = await Setting.findOneAndUpdate(
       { key: 'authorized_status_phones' },

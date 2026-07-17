@@ -4,6 +4,7 @@ import FlashStatus from '../models/FlashStatus.js';
 import cloudinary from '../config/cloudinary.js';
 import { sendSafeMessage, getRawClient, getStatus } from '../config/whatsapp.js';
 import https from 'https';
+import { normalizePhone } from '../utils/phoneFormatter.js';
 
 const router = express.Router();
 
@@ -59,13 +60,12 @@ router.post('/buy', async (req, res) => {
       return res.status(400).json({ success: false, message: 'statusId and customerPhone are required.' });
     }
 
-    // Normalize phone (Kenyan format 07xx → 2547xx)
-    let cleanPhone = String(customerPhone).replace(/\D/g, '');
-    if (cleanPhone.startsWith('0') && cleanPhone.length === 10) cleanPhone = '254' + cleanPhone.slice(1);
-    if (cleanPhone.length < 9) {
+    // Normalize phone (Kenyan formats)
+    const cleanPhone = normalizePhone(customerPhone);
+    if (!cleanPhone || cleanPhone.length < 9) {
       return res.status(400).json({
         success: false,
-        message: 'Invalid phone number. Use format 07XXXXXXXX or 2547XXXXXXXX.'
+        message: 'Invalid phone number. Use format 07XXXXXXXX, 2547XXXXXXXX, +254XXXXXXXX, or 7XXXXXXXX.'
       });
     }
 
