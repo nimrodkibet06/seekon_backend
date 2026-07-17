@@ -1031,9 +1031,6 @@ export const getStatus = () => ({
  * @param {string} phone - The phone number to request a pairing code for.
  */
 export const requestPairingCode = async (phone) => {
-  if (!sock) {
-    throw new Error('WhatsApp Client is not initialized yet.');
-  }
   if (isConnected) {
     throw new Error('WhatsApp is already connected.');
   }
@@ -1041,6 +1038,25 @@ export const requestPairingCode = async (phone) => {
   // Use the same formatter logic
   const formatted = normalizePhone(phone);
 
+  console.log(`🔄 [WA-PAIRING]: Killing existing socket and clearing QR to request pairing code for ${formatted}...`);
+  currentQR = null;
+
+  if (sock) {
+    try {
+      sock.ev.removeAllListeners();
+      await sock.end(undefined);
+    } catch (e) {
+      console.warn('⚠️ [WA-PAIRING]: Error closing socket:', e.message);
+    }
+  }
+
+  // Re-initialize socket
+  await initWhatsAppClient();
+
+  // Wait a moment to ensure socket has registered its internal state
+  await new Promise(resolve => setTimeout(resolve, 1500));
+
+  console.log(`📞 [WA-PAIRING]: Requesting pairing code for ${formatted} on fresh socket...`);
   const code = await sock.requestPairingCode(formatted);
   return code;
 };
