@@ -729,8 +729,8 @@ export const initWhatsAppClient = async () => {
       creds: state.creds,
       keys: makeCacheableSignalKeyStore(state.keys, logger),
     },
-    // STEP 2.2 — Hidden browser string masks automation indicators
-    browser: ['Seekon Desktop', 'Chrome', '10.0.0'],
+    // STEP 2.2 — Hidden browser string masks automation indicators (uses recognized OS name)
+    browser: ['macOS', 'Seekon Desktop', '3.0.0'],
     // Memory optimisations for the 1 GB Azure instance
     syncFullHistory:              false,
     markOnlineOnConnect:          false,
