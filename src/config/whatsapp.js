@@ -1053,8 +1053,8 @@ export const requestPairingCode = async (phone) => {
   // Re-initialize socket
   await initWhatsAppClient();
 
-  // Wait a moment to ensure socket has registered its internal state
-  await new Promise(resolve => setTimeout(resolve, 1500));
+  // Wait a moment to ensure socket has registered its internal state (increased to 4000ms for VPS network latency)
+  await new Promise(resolve => setTimeout(resolve, 4000));
 
   console.log(`📞 [WA-PAIRING]: Requesting pairing code for ${formatted} on fresh socket...`);
   const code = await sock.requestPairingCode(formatted);
