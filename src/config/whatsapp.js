@@ -724,13 +724,13 @@ export const initWhatsAppClient = async () => {
   sock = makeWASocket({
     version,
     logger,
-    printQRInTerminal: true,
+    printQRInTerminal: false,
     auth: {
       creds: state.creds,
       keys: makeCacheableSignalKeyStore(state.keys, logger),
     },
-    // STEP 2.2 — Hidden browser string masks automation indicators (uses recognized OS name)
-    browser: ['macOS', 'Seekon Desktop', '3.0.0'],
+    // STEP 2.2 — Match browser fingerprint with reference project
+    browser: ['Ubuntu', 'Chrome', '20.0.04'],
     // Memory optimisations for the 1 GB Azure instance
     syncFullHistory:              false,
     markOnlineOnConnect:          false,
