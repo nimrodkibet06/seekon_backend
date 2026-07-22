@@ -110,6 +110,7 @@ const MAX_CACHE_SIZE = 500;
 
 const activeSessions = new Map();
 const adminUploadSessions = new Map();
+const sentMessageIds = new Set();
 const rawGroupJid = process.env.ADMIN_GROUP_JID || process.env.ADMIN_WHATSAPP_GROUP_ID || '';
 const adminGroupJid = rawGroupJid.replace(/['"]/g, '').trim();
 const imageQueue = new Queue('imageQueue', { connection: { host: '127.0.0.1', port: 6379 } });
@@ -862,8 +863,8 @@ const handleAdminPanelUpsert = async (messages) => {
       const remoteJid = msg.key?.remoteJid || '';
       const senderId = msg.key?.participant || msg.key?.remoteJid || '';
 
-      // Ignore messages sent by the bot itself
-      if (msg.key?.fromMe) continue;
+      // Ignore messages sent programmatically by the bot itself, but allow manual messages sent from a linked device
+      if (msg.key?.id && sentMessageIds.has(msg.key.id)) continue;
 
       const isFromAdminGroup = adminGroupJid && remoteJid === adminGroupJid;
       const isDM = remoteJid.endsWith('@s.whatsapp.net');
@@ -885,7 +886,10 @@ const handleAdminPanelUpsert = async (messages) => {
       if (!isDM && !isFromAdminGroup) continue;
 
       const { authorizedPhones, authorizedLids } = await loadAuthorizedIdentifiers();
-      const isSenderAdmin = isSenderAuthorized(senderId, authorizedPhones, authorizedLids);
+      const getBareJid = (jid) => jid ? jid.split('@')[0].split(':')[0] + '@s.whatsapp.net' : '';
+      const botOwnJid = sock?.user?.id ? getBareJid(sock.user.id) : '';
+      const isSenderOwnNumber = botOwnJid && getBareJid(senderId) === botOwnJid;
+      const isSenderAdmin = isSenderOwnNumber || isSenderAuthorized(senderId, authorizedPhones, authorizedLids);
 
       // Gate: sender must be an authorized admin, OR the message must come from the admin group
       if (!isSenderAdmin && !isFromAdminGroup) continue;
@@ -1206,6 +1210,20 @@ export const initWhatsAppClient = async () => {
       return cached?.message || { conversation: '' };
     },
   });
+
+  // Patch sock.sendMessage to automatically capture sent message IDs
+  const originalSendMessage = sock.sendMessage.bind(sock);
+  sock.sendMessage = async (jid, content, options) => {
+    const result = await originalSendMessage(jid, content, options);
+    if (result?.key?.id) {
+      sentMessageIds.add(result.key.id);
+      if (sentMessageIds.size > 1000) {
+        const oldestKey = sentMessageIds.values().next().value;
+        sentMessageIds.delete(oldestKey);
+      }
+    }
+    return result;
+  };
 
   // Cache all incoming messages for the getMessage hook
   sock.ev.on('messages.upsert', ({ messages: msgs }) => {
