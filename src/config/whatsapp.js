@@ -529,14 +529,15 @@ const processStatusTaskBackground = async (task, msg) => {
     console.log(`💾 ${label} FlashStatus saved: ID ${flashStatus._id}`);
 
     // ── Resend admin success email (non-blocking, non-fatal) ───────────────
-    sendSuccessNotificationEmail('nimrodkibet376@gmail.com', {
-      author:    senderId,
-      type:      mediaType,
-      mediaUrl:  uploadResult.secure_url,
-      timestamp: flashStatus.createdAt,
-    }).catch(e =>
-      console.error(`⚠️ ${label} Success email failed (non-fatal):`, e.message)
-    );
+    // sendSuccessNotificationEmail('nimrodkibet376@gmail.com', {
+    //   author:    senderId,
+    //   type:      mediaType,
+    //   mediaUrl:  uploadResult.secure_url,
+    //   timestamp: flashStatus.createdAt,
+    // }).catch(e =>
+    //   console.error(`⚠️ ${label} Success email failed (non-fatal):`, e.message)
+    // );
+    console.log(`ℹ️ ${label} Admin success email notification skipped per configuration.`);
 
     // ── Mark task completed ────────────────────────────────────────────────
     await StatusTask.findByIdAndUpdate(task._id, {
