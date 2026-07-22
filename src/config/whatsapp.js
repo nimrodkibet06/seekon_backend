@@ -815,7 +815,8 @@ const handleAdminPanelUpsert = async (messages) => {
               brand: '',
               sizes: [],
               colors: [],
-              imagePaths: []
+              imagePaths: [],
+              runBgRemoval: true
             }
           };
           adminUploadSessions.set(senderId, session);
@@ -940,18 +941,8 @@ const handleAdminPanelUpsert = async (messages) => {
               await sendSafeMessage(remoteJid, "⚠️ Please upload at least one image before replying *done*.");
               return;
             }
-            session.step = 'confirming';
-            const summary = `📝 *Product Summary* 📝\n\n` +
-              `*Name:* ${session.data.name}\n` +
-              `*Description:* ${session.data.description}\n` +
-              `*Price:* KES ${session.data.price}\n` +
-              `*Category:* ${session.data.category}\n` +
-              `*Brand:* ${session.data.brand}\n` +
-              `*Sizes:* ${session.data.sizes.join(', ') || 'None'}\n` +
-              `*Colors:* ${session.data.colors.join(', ') || 'None'}\n` +
-              `*Images:* ${session.data.imagePaths.length} attached\n\n` +
-              `Reply *yes* to confirm and upload, or *no* to start over:`;
-            await sendSafeMessage(remoteJid, summary);
+            session.step = 'awaiting_bg_removal';
+            await sendSafeMessage(remoteJid, "🤖 Would you like to run AI Background Removal on these images? Reply *yes* or *no*:");
             return;
           }
 
@@ -988,6 +979,33 @@ const handleAdminPanelUpsert = async (messages) => {
           break;
         }
 
+        case 'awaiting_bg_removal': {
+          const lowerText = text.toLowerCase();
+          if (lowerText === 'yes' || lowerText === 'y') {
+            session.data.runBgRemoval = true;
+          } else if (lowerText === 'no' || lowerText === 'n') {
+            session.data.runBgRemoval = false;
+          } else {
+            await sendSafeMessage(remoteJid, "⚠️ Invalid input. Would you like to run AI Background Removal? Reply *yes* or *no*:");
+            return;
+          }
+
+          session.step = 'confirming';
+          const summary = `📝 *Product Summary* 📝\n\n` +
+            `*Name:* ${session.data.name}\n` +
+            `*Description:* ${session.data.description}\n` +
+            `*Price:* KES ${session.data.price}\n` +
+            `*Category:* ${session.data.category}\n` +
+            `*Brand:* ${session.data.brand}\n` +
+            `*Sizes:* ${session.data.sizes.join(', ') || 'None'}\n` +
+            `*Colors:* ${session.data.colors.join(', ') || 'None'}\n` +
+            `*Images:* ${session.data.imagePaths.length} attached\n` +
+            `*AI Background Removal:* ${session.data.runBgRemoval ? 'Enabled ✅' : 'Disabled ❌'}\n\n` +
+            `Reply *yes* to confirm and upload, or *no* to start over:`;
+          await sendSafeMessage(remoteJid, summary);
+          break;
+        }
+
         case 'confirming':
           if (text.toLowerCase() === 'yes') {
             await sendSafeMessage(remoteJid, "⏳ Saving product and queueing image processing job...");
@@ -1006,7 +1024,7 @@ const handleAdminPanelUpsert = async (messages) => {
               await imageQueue.add('processImages', {
                 productId: product._id.toString(),
                 imagePaths: session.data.imagePaths,
-                runAIBackgroundRemoval: true
+                runAIBackgroundRemoval: session.data.runBgRemoval
               });
 
               await sendSafeMessage(remoteJid, `🎉 *Success!* Product "${session.data.name}" has been created as 'processing' with ID \`${product._id}\`. Background job handed off to Seekon BullMQ worker.`);
