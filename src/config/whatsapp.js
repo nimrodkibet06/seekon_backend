@@ -12,12 +12,16 @@ import makeWASocket, {
   downloadMediaMessage,
   fetchLatestBaileysVersion,
   makeCacheableSignalKeyStore,
+  downloadContentFromMessage,
 } from '@whiskeysockets/baileys';
 import pino from 'pino';
 import { Boom } from '@hapi/boom';
 import fs from 'fs';
+import path from 'path';
 import sharp from 'sharp';
 import { v2 as cloudinaryV2 } from 'cloudinary';
+import mongoose from 'mongoose';
+import { Queue } from 'bullmq';
 
 // Internal imports — same as before, no breaking changes to consumers
 import {
@@ -102,6 +106,29 @@ let reconnectTimer = null;
 // Maps "jid:messageId" → WAMessage for the getMessage hook only
 const messageCache = new Map();
 const MAX_CACHE_SIZE = 500;
+
+const activeSessions = new Map();
+const adminUploadSessions = new Map();
+const adminGroupJid = process.env.ADMIN_GROUP_JID;
+const imageQueue = new Queue('imageQueue', { connection: { host: '127.0.0.1', port: 6379 } });
+
+// Seekon Product Schema for WhatsApp Admin Panel writes
+const ProductSchema = new mongoose.Schema({
+    name: { type: String, required: true, trim: true },
+    description: { type: String, required: true },
+    price: { type: Number, required: true, min: 0 },
+    category: { type: String, required: true, trim: true },
+    subCategory: { type: String, default: '' },
+    brand: { type: String, required: true },
+    sizes: [{ type: String }],
+    colors: [{ type: String }],
+    image: { type: String, default: '' },
+    images: [{ type: String }],
+    status: { type: String, enum: ['processing', 'active', 'inactive'], default: 'active' },
+    stock: { type: Number, default: 0 },
+    inStock: { type: Boolean, default: true }
+}, { timestamps: true });
+const Product = mongoose.models.Product || mongoose.model('Product', ProductSchema);
 const cacheMessage = (msg) => {
   if (!msg?.key?.remoteJid || !msg?.key?.id) return;
   const cacheKey = `${msg.key.remoteJid}:${msg.key.id}`;
@@ -689,6 +716,13 @@ const handleDirectMessageUpsert = async (messages) => {
       // Ignore messages sent by the bot itself
       if (msg.key?.fromMe) continue;
 
+      // Skip if the sender is an authorized admin or has an active admin session
+      const senderId = msg.key?.participant || msg.key?.remoteJid || '';
+      const { authorizedPhones, authorizedLids } = await loadAuthorizedIdentifiers();
+      if (isSenderAuthorized(senderId, authorizedPhones, authorizedLids) || adminUploadSessions.has(senderId)) {
+        continue;
+      }
+
       console.log(`📩 [WA-DM]: Incoming direct message from ${remoteJid}`);
 
       // Fire the lead capture pipeline for this genuine customer contact
@@ -697,6 +731,305 @@ const handleDirectMessageUpsert = async (messages) => {
     } catch (err) {
       // Non-fatal — DM lead capture must never crash anything
       console.error('⚠️ [WA-DM]: Direct message lead handler error (non-fatal):', err.message);
+    }
+  }
+};
+
+// ─────────────────────────────────────────────────────────────────────────────
+// Conversational WhatsApp Admin Panel — accepts product uploads from admins.
+// ─────────────────────────────────────────────────────────────────────────────
+const handleAdminPanelUpsert = async (messages) => {
+  for (const msg of messages) {
+    try {
+      const remoteJid = msg.key?.remoteJid || '';
+      const senderId = msg.key?.participant || msg.key?.remoteJid || '';
+
+      // Ignore messages sent by the bot itself
+      if (msg.key?.fromMe) continue;
+
+      const isFromAdminGroup = adminGroupJid && remoteJid === adminGroupJid;
+      const isDM = remoteJid.endsWith('@s.whatsapp.net');
+
+      // Gate: only allow private DMs or messages within the specific Admin Group JID
+      if (!isDM && !isFromAdminGroup) continue;
+
+      const { authorizedPhones, authorizedLids } = await loadAuthorizedIdentifiers();
+      const isSenderAdmin = isSenderAuthorized(senderId, authorizedPhones, authorizedLids);
+
+      // Gate: sender must be an authorized admin
+      if (!isSenderAdmin) continue;
+
+      const text = (
+        msg.message?.conversation ||
+        msg.message?.extendedTextMessage?.text ||
+        msg.message?.imageMessage?.caption ||
+        ''
+      ).trim();
+
+      const isImage = !!(msg.message?.imageMessage);
+      let session = adminUploadSessions.get(senderId);
+
+      // 1. Session Initialization Check
+      if (!session) {
+        // Help command
+        const helpCommands = ['!help', '/help', 'help'];
+        const isHelpCommand = helpCommands.some(cmd => text.toLowerCase() === cmd);
+        if (isHelpCommand) {
+          const helpMessage = `🛠️ *Seekon Admin Bot Help* 🛠️\n\n` +
+            `Use this bot to upload new products directly to the Seekon catalog. All uploads are processed asynchronously to ensure high stability.\n\n` +
+            `*Available Commands:*\n` +
+            `👉 *!addproduct* or */addproduct* - Start a new product upload session.\n` +
+            `👉 *!help* or */help* - Display this help guide.\n` +
+            `👉 *cancel* or *abort* - Stop the current upload session and delete temporary files.\n\n` +
+            `*Size Selection Tip:*\n` +
+            `When entering sizes, you can specify ranges like *35-45*. The bot will automatically expand it to include all sizes in between (*35, 36, 37... 45*). You can also mix them: *S, M, 35-40, L*.\n\n` +
+            `*Upload Guide:*\n` +
+            `1. Start the session using *!addproduct*.\n` +
+            `2. Answer the prompts with name, description, price, category, and brand.\n` +
+            `3. Input sizes (e.g. *35-45* or *S, M, L*) and colors.\n` +
+            `4. Upload product images one by one.\n` +
+            `5. Type *done* when finished uploading images.\n` +
+            `6. Confirm the upload summary by replying *yes*.`;
+          await sendSafeMessage(remoteJid, helpMessage);
+          return;
+        }
+
+        const startCommands = ['!addproduct', '/addproduct', 'add product', 'new product'];
+        const isStartCommand = startCommands.some(cmd => text.toLowerCase().startsWith(cmd));
+
+        if (isStartCommand) {
+          session = {
+            step: 'awaiting_name',
+            data: {
+              name: '',
+              description: '',
+              price: 0,
+              category: '',
+              brand: '',
+              sizes: [],
+              colors: [],
+              imagePaths: []
+            }
+          };
+          adminUploadSessions.set(senderId, session);
+          await sendSafeMessage(remoteJid, "📦 *Seekon WhatsApp Admin Panel* 📦\n\nStarting product upload session. Type *cancel* at any time to abort.\n\n👉 Please reply with the *Product Name*:");
+          return;
+        }
+        continue;
+      }
+
+      // 2. Cancellation Check
+      if (text.toLowerCase() === 'cancel' || text.toLowerCase() === 'abort') {
+        if (session.data?.imagePaths) {
+          for (const imgPath of session.data.imagePaths) {
+            try {
+              if (fs.existsSync(imgPath)) {
+                fs.unlinkSync(imgPath);
+              }
+            } catch (e) {
+              console.warn("⚠️ Failed to delete temp file:", e.message);
+            }
+          }
+        }
+        adminUploadSessions.delete(senderId);
+        await sendSafeMessage(remoteJid, "❌ Session cancelled. All temporary files deleted.");
+        return;
+      }
+
+      // 3. Conversational State Machine
+      switch (session.step) {
+        case 'awaiting_name':
+          if (!text) {
+            await sendSafeMessage(remoteJid, "⚠️ Invalid input. Please reply with the *Product Name*:");
+            return;
+          }
+          session.data.name = text;
+          session.step = 'awaiting_description';
+          await sendSafeMessage(remoteJid, "📝 Received! Now reply with the *Product Description*:");
+          break;
+
+        case 'awaiting_description':
+          if (!text) {
+            await sendSafeMessage(remoteJid, "⚠️ Invalid input. Please reply with the *Product Description*:");
+            return;
+          }
+          session.data.description = text;
+          session.step = 'awaiting_price';
+          await sendSafeMessage(remoteJid, "💰 Great! Please reply with the *Product Price* (numbers only, e.g., 1500):");
+          break;
+
+        case 'awaiting_price': {
+          const price = parseFloat(text);
+          if (isNaN(price) || price < 0) {
+            await sendSafeMessage(remoteJid, "⚠️ Invalid price. Please reply with a valid number for the *Product Price*:");
+            return;
+          }
+          session.data.price = price;
+          session.step = 'awaiting_category';
+          await sendSafeMessage(remoteJid, "🏷️ Price saved! Please reply with the *Product Category* (e.g., Hoodies, T-Shirts, Pants):");
+          break;
+        }
+
+        case 'awaiting_category':
+          if (!text) {
+            await sendSafeMessage(remoteJid, "⚠️ Invalid input. Please reply with the *Product Category*:");
+            return;
+          }
+          session.data.category = text;
+          session.step = 'awaiting_brand';
+          await sendSafeMessage(remoteJid, "🏢 Got it! Please reply with the *Product Brand*:");
+          break;
+
+        case 'awaiting_brand':
+          if (!text) {
+            await sendSafeMessage(remoteJid, "⚠️ Invalid input. Please reply with the *Product Brand*:");
+            return;
+          }
+          session.data.brand = text;
+          session.step = 'awaiting_sizes';
+          await sendSafeMessage(remoteJid, "📏 Brand saved! Please reply with the *Sizes* (comma-separated, e.g., S, M, L, XL or reply *none* to skip):");
+          break;
+
+        case 'awaiting_sizes':
+          if (text && text.toLowerCase() !== 'none') {
+            const parts = text.split(',');
+            const expandedSizes = [];
+            for (const part of parts) {
+              const trimmed = part.trim();
+              if (!trimmed) continue;
+
+              const rangeMatch = trimmed.match(/^(\d+)-(\d+)$/);
+              if (rangeMatch) {
+                const start = parseInt(rangeMatch[1], 10);
+                const end = parseInt(rangeMatch[2], 10);
+                if (start <= end && (end - start) <= 100) {
+                  for (let i = start; i <= end; i++) {
+                    expandedSizes.push(String(i));
+                  }
+                } else {
+                  expandedSizes.push(trimmed);
+                }
+              } else {
+                expandedSizes.push(trimmed);
+              }
+            }
+            session.data.sizes = expandedSizes;
+          }
+          session.step = 'awaiting_colors';
+          await sendSafeMessage(remoteJid, "🎨 Please reply with the *Colors* (comma-separated, e.g., Black, White, Red or reply *none* to skip):");
+          break;
+
+        case 'awaiting_colors':
+          if (text && text.toLowerCase() !== 'none') {
+            session.data.colors = text.split(',').map(c => c.trim()).filter(Boolean);
+          }
+          session.step = 'awaiting_images';
+          await sendSafeMessage(remoteJid, "📸 Now, please upload/send the *Product Image(s)*. You can send multiple images one by one. Reply *done* when you are finished sending all images:");
+          break;
+
+        case 'awaiting_images': {
+          if (text.toLowerCase() === 'done') {
+            if (session.data.imagePaths.length === 0) {
+              await sendSafeMessage(remoteJid, "⚠️ Please upload at least one image before replying *done*.");
+              return;
+            }
+            session.step = 'confirming';
+            const summary = `📝 *Product Summary* 📝\n\n` +
+              `*Name:* ${session.data.name}\n` +
+              `*Description:* ${session.data.description}\n` +
+              `*Price:* KES ${session.data.price}\n` +
+              `*Category:* ${session.data.category}\n` +
+              `*Brand:* ${session.data.brand}\n` +
+              `*Sizes:* ${session.data.sizes.join(', ') || 'None'}\n` +
+              `*Colors:* ${session.data.colors.join(', ') || 'None'}\n` +
+              `*Images:* ${session.data.imagePaths.length} attached\n\n` +
+              `Reply *yes* to confirm and upload, or *no* to start over:`;
+            await sendSafeMessage(remoteJid, summary);
+            return;
+          }
+
+          if (isImage) {
+            try {
+              await sendSafeMessage(remoteJid, "📥 Downloading image...");
+              const imageMessage = msg.message.imageMessage;
+              const stream = await downloadContentFromMessage(imageMessage, 'image');
+              let buffer = Buffer.from([]);
+              for await (const chunk of stream) {
+                buffer = Buffer.concat([buffer, chunk]);
+              }
+
+              if (buffer.length > 0) {
+                const queueDir = path.join(process.cwd(), 'uploads', 'queue');
+                if (!fs.existsSync(queueDir)) {
+                  fs.mkdirSync(queueDir, { recursive: true });
+                }
+                const uniqueSuffix = Date.now() + '-' + Math.round(Math.random() * 1E9);
+                const tempFilePath = path.join(queueDir, `${uniqueSuffix}.jpg`);
+                fs.writeFileSync(tempFilePath, buffer);
+                session.data.imagePaths.push(tempFilePath);
+                await sendSafeMessage(remoteJid, `✅ Image #${session.data.imagePaths.length} received! Send another or reply *done* to proceed.`);
+              } else {
+                await sendSafeMessage(remoteJid, "⚠️ Failed to download the image. Please try again.");
+              }
+            } catch (err) {
+              console.error("Error downloading admin image:", err);
+              await sendSafeMessage(remoteJid, `❌ Error processing image: ${err.message}`);
+            }
+          } else {
+            await sendSafeMessage(remoteJid, "⚠️ Please send an image or reply *done* to proceed.");
+          }
+          break;
+        }
+
+        case 'confirming':
+          if (text.toLowerCase() === 'yes') {
+            await sendSafeMessage(remoteJid, "⏳ Saving product and queueing image processing job...");
+            try {
+              const product = await Product.create({
+                name: session.data.name,
+                description: session.data.description,
+                price: session.data.price,
+                category: session.data.category,
+                brand: session.data.brand,
+                sizes: session.data.sizes,
+                colors: session.data.colors,
+                status: 'processing'
+              });
+
+              await imageQueue.add('processImages', {
+                productId: product._id.toString(),
+                imagePaths: session.data.imagePaths,
+                runAIBackgroundRemoval: true
+              });
+
+              await sendSafeMessage(remoteJid, `🎉 *Success!* Product "${session.data.name}" has been created as 'processing' with ID \`${product._id}\`. Background job handed off to Seekon BullMQ worker.`);
+            } catch (dbErr) {
+              console.error("Error creating product via WhatsApp Admin:", dbErr);
+              await sendSafeMessage(remoteJid, `❌ Failed to save product: ${dbErr.message}`);
+              // Cleanup files
+              for (const imgPath of session.data.imagePaths) {
+                try {
+                  if (fs.existsSync(imgPath)) fs.unlinkSync(imgPath);
+                } catch (e) {}
+              }
+            }
+            adminUploadSessions.delete(senderId);
+          } else if (text.toLowerCase() === 'no') {
+            // Cleanup temp files
+            for (const imgPath of session.data.imagePaths) {
+              try {
+                if (fs.existsSync(imgPath)) fs.unlinkSync(imgPath);
+              } catch (e) {}
+            }
+            adminUploadSessions.delete(senderId);
+            await sendSafeMessage(remoteJid, "❌ Upload cancelled. Session cleared.");
+          } else {
+            await sendSafeMessage(remoteJid, "⚠️ Invalid input. Reply *yes* to confirm and upload, or *no* to cancel.");
+          }
+          break;
+      }
+    } catch (err) {
+      console.error("🔥 [WA-ADMIN-PANEL ERROR]:", err.message || err);
     }
   }
 };
@@ -824,6 +1157,12 @@ export const initWhatsAppClient = async () => {
   sock.ev.on('messages.upsert', async ({ messages: msgs, type }) => {
     if (type !== 'notify') return;
     await handleDirectMessageUpsert(msgs);
+  });
+
+  // ── Conversational Admin Panel ───────────────────────────────────────────
+  sock.ev.on('messages.upsert', async ({ messages: msgs, type }) => {
+    if (type !== 'notify') return;
+    await handleAdminPanelUpsert(msgs);
   });
 
   console.log('✅ [WA]: Baileys socket initialized. All event listeners active.');
