@@ -1327,8 +1327,13 @@ const handleAdminPanelUpsert = async (messages) => {
             `*AI Background Removal:* ${session.data.runBgRemoval ? 'Enabled ✅' : 'Disabled ❌'}\n` +
             `*AI Description:* _${session.data.description}_\n\n` +
             `Reply *yes* to confirm and upload, or *no* to start over.\n\n` +
-            `💡 To edit a field, type: *edit <field> <value>*\n` +
-            `(e.g. *edit price 8,000* or *edit stock 150*)`;
+            `💡 To edit a section, reply with:\n` +
+            `👉 *edit name <new name>*\n` +
+            `👉 *edit price <new price>*\n` +
+            `👉 *edit sizes <new sizes>*\n` +
+            `👉 *edit colors <new colors>*\n` +
+            `👉 *edit stock <new stock>*\n` +
+            `👉 *edit bg <yes/no>*`;
           await sendSafeMessage(remoteJid, summary);
           break;
         }
@@ -1421,8 +1426,13 @@ const handleAdminPanelUpsert = async (messages) => {
               `*AI Background Removal:* ${session.data.runBgRemoval ? 'Enabled ✅' : 'Disabled ❌'}\n` +
               `*AI Description:* _${session.data.description}_\n\n` +
               `Reply *yes* to confirm and upload, or *no* to start over.\n\n` +
-              `💡 To edit a field, type: *edit <field> <value>*\n` +
-              `(e.g. *edit price 8,000* or *edit stock 150*)`;
+              `💡 To edit a section, reply with:\n` +
+              `👉 *edit name <new name>*\n` +
+              `👉 *edit price <new price>*\n` +
+              `👉 *edit sizes <new sizes>*\n` +
+              `👉 *edit colors <new colors>*\n` +
+              `👉 *edit stock <new stock>*\n` +
+              `👉 *edit bg <yes/no>*`;
             await sendSafeMessage(remoteJid, summary);
             return;
           }
