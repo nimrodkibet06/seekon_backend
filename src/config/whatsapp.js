@@ -35,6 +35,7 @@ import Setting from '../models/Setting.js';
 import { normalizePhone } from '../utils/phoneFormatter.js';
 import User from '../models/User.js';
 import Admin from '../models/Admin.js';
+import { getGroqClient } from '../utils/groqProvider.js';
 
 // ─────────────────────────────────────────────────────────────────────────────
 // STEP 5 — Isolated Cloudinary instance for status media (Account B)
@@ -737,6 +738,121 @@ const handleDirectMessageUpsert = async (messages) => {
   }
 };
 
+/**
+ * getExistingBrands — Dynamically queries the database for all registered brand names (uppercased).
+ * Ensures that AI-suggested brands match existing ones precisely, falling back to 'SEEKON'.
+ */
+const getExistingBrands = async () => {
+  try {
+    const Brand = mongoose.models.Brand || mongoose.model('Brand');
+    const brandDocs = await Brand.find({ isActive: true }, 'name');
+    const brandNames = brandDocs.map(b => b.name.trim().toUpperCase());
+    
+    const distinctProductBrands = await Product.distinct('brand');
+    for (const b of distinctProductBrands) {
+      if (b) {
+        const upperB = b.trim().toUpperCase();
+        if (!brandNames.includes(upperB)) {
+          brandNames.push(upperB);
+        }
+      }
+    }
+    
+    if (!brandNames.includes('SEEKON')) {
+      brandNames.push('SEEKON');
+    }
+    return brandNames;
+  } catch (err) {
+    console.error('Error fetching existing brands:', err);
+    return ['SEEKON', 'NIKE', 'ADIDAS', 'PUMA', 'JORDAN', 'NEW BALANCE'];
+  }
+};
+
+/**
+ * analyzeProductWithAI — Calls Groq (llama-3.3-70b-versatile) to deduce brand,
+ * category (Sneakers, Apparel, Accessories), and write a persuasive product description in JSON mode.
+ */
+const analyzeProductWithAI = async (productName, existingBrands) => {
+  try {
+    const groq = getGroqClient();
+    
+    const systemPrompt = `You are a product catalog manager for Seekon.
+Analyze the following product name: "${productName}"
+Determine:
+1. Brand: Deduces the brand of the product (e.g., Nike, Jordan, Adidas, Seekon, etc.).
+2. Category: Deduces whether the product belongs to: "Sneakers", "Apparel", or "Accessories".
+3. Description: Generate a modern, persuasive, and concise single-paragraph product description (maximum 3-4 high-impact sentences). Do not use markdown, do not use asterisks, do not include introductory phrases.
+
+You must reply with a valid JSON object ONLY. The JSON keys must be:
+- "brand": string (e.g. "Nike")
+- "category": string (must be exactly "Sneakers", "Apparel", or "Accessories")
+- "description": string (the generated description)
+
+Do NOT wrap the response in markdown blocks like \`\`\`json. Output raw JSON string only.`;
+
+    const response = await groq.chat.completions.create({
+      model: "llama-3.3-70b-versatile",
+      messages: [
+        { role: "system", content: systemPrompt },
+        { role: "user", content: productName }
+      ],
+      response_format: { type: "json_object" }
+    });
+
+    const resultText = response.choices[0]?.message?.content || "{}";
+    
+    let data = {};
+    try {
+      data = JSON.parse(resultText);
+    } catch (parseErr) {
+      console.warn('Failed to parse Groq JSON response, attempting regex fallback:', parseErr);
+      const brandMatch = resultText.match(/"brand"\s*:\s*"([^"]+)"/);
+      const catMatch = resultText.match(/"category"\s*:\s*"([^"]+)"/);
+      const descMatch = resultText.match(/"description"\s*:\s*"([^"]+)"/);
+      data = {
+        brand: brandMatch ? brandMatch[1] : 'Seekon',
+        category: catMatch ? catMatch[1] : 'Sneakers',
+        description: descMatch ? descMatch[1] : `High-quality ${productName} from Seekon.`
+      };
+    }
+    
+    // Match brand against existing database brands (case-insensitive)
+    let finalBrand = 'SEEKON';
+    if (data.brand && typeof data.brand === 'string') {
+      const match = existingBrands.find(b => b.toUpperCase() === data.brand.trim().toUpperCase());
+      if (match) {
+        finalBrand = match;
+      }
+    }
+    
+    // Category mapping: Sneakers, Apparel, Accessories
+    let finalCategory = 'Sneakers'; // default fallback
+    if (data.category && typeof data.category === 'string') {
+      const catUpper = data.category.trim().toUpperCase();
+      if (catUpper.includes('SNEAKER') || catUpper.includes('SHOE')) {
+        finalCategory = 'Sneakers';
+      } else if (catUpper.includes('APPAREL') || catUpper.includes('CLOTH') || catUpper.includes('WEAR') || catUpper.includes('JACKET') || catUpper.includes('HOODIE') || catUpper.includes('SHIRT') || catUpper.includes('PANT')) {
+        finalCategory = 'Apparel';
+      } else if (catUpper.includes('ACCESSOR') || catUpper.includes('BELT') || catUpper.includes('HAT') || catUpper.includes('BAG') || catUpper.includes('CAP')) {
+        finalCategory = 'Accessories';
+      }
+    }
+    
+    return {
+      brand: finalBrand,
+      category: finalCategory,
+      description: data.description || `High-quality ${productName} from Seekon.`,
+    };
+  } catch (err) {
+    console.error('Error in analyzeProductWithAI:', err);
+    return {
+      brand: 'SEEKON',
+      category: 'Sneakers',
+      description: `High-quality ${productName} from Seekon.`
+    };
+  }
+};
+
 // ─────────────────────────────────────────────────────────────────────────────
 // Conversational WhatsApp Admin Panel — accepts product uploads from admins.
 // ─────────────────────────────────────────────────────────────────────────────
@@ -810,12 +926,10 @@ const handleAdminPanelUpsert = async (messages) => {
             step: 'awaiting_name',
             data: {
               name: '',
-              description: '',
               price: 0,
-              category: '',
-              brand: '',
               sizes: [],
               colors: [],
+              stock: 200,
               imagePaths: [],
               runBgRemoval: true
             }
@@ -853,16 +967,6 @@ const handleAdminPanelUpsert = async (messages) => {
             return;
           }
           session.data.name = text;
-          session.step = 'awaiting_description';
-          await sendSafeMessage(remoteJid, "📝 Received! Now reply with the *Product Description*:");
-          break;
-
-        case 'awaiting_description':
-          if (!text) {
-            await sendSafeMessage(remoteJid, "⚠️ Invalid input. Please reply with the *Product Description*:");
-            return;
-          }
-          session.data.description = text;
           session.step = 'awaiting_price';
           await sendSafeMessage(remoteJid, "💰 Great! Please reply with the *Product Price* (numbers only, e.g., 1500):");
           break;
@@ -874,30 +978,10 @@ const handleAdminPanelUpsert = async (messages) => {
             return;
           }
           session.data.price = price;
-          session.step = 'awaiting_category';
-          await sendSafeMessage(remoteJid, "🏷️ Price saved! Please reply with the *Product Category* (e.g., Hoodies, T-Shirts, Pants):");
+          session.step = 'awaiting_sizes';
+          await sendSafeMessage(remoteJid, "📏 Price saved! Please reply with the *Sizes* (comma-separated, e.g., S, M, L, XL or 35-45, or reply *none* to skip):");
           break;
         }
-
-        case 'awaiting_category':
-          if (!text) {
-            await sendSafeMessage(remoteJid, "⚠️ Invalid input. Please reply with the *Product Category*:");
-            return;
-          }
-          session.data.category = text;
-          session.step = 'awaiting_brand';
-          await sendSafeMessage(remoteJid, "🏢 Got it! Please reply with the *Product Brand*:");
-          break;
-
-        case 'awaiting_brand':
-          if (!text) {
-            await sendSafeMessage(remoteJid, "⚠️ Invalid input. Please reply with the *Product Brand*:");
-            return;
-          }
-          session.data.brand = text;
-          session.step = 'awaiting_sizes';
-          await sendSafeMessage(remoteJid, "📏 Brand saved! Please reply with the *Sizes* (comma-separated, e.g., S, M, L, XL or reply *none* to skip):");
-          break;
 
         case 'awaiting_sizes':
           if (text && text.toLowerCase() !== 'none') {
@@ -932,9 +1016,20 @@ const handleAdminPanelUpsert = async (messages) => {
           if (text && text.toLowerCase() !== 'none') {
             session.data.colors = text.split(',').map(c => c.trim()).filter(Boolean);
           }
+          session.step = 'awaiting_stock';
+          await sendSafeMessage(remoteJid, "📦 Please reply with the *Stock count* (or reply *none* to default to 200):");
+          break;
+
+        case 'awaiting_stock': {
+          let stock = parseInt(text, 10);
+          if (isNaN(stock) || stock < 0 || text.toLowerCase() === 'none') {
+            stock = 200;
+          }
+          session.data.stock = stock;
           session.step = 'awaiting_images';
           await sendSafeMessage(remoteJid, "📸 Now, please upload/send the *Product Image(s)*. You can send multiple images one by one. Reply *done* when you are finished sending all images:");
           break;
+        }
 
         case 'awaiting_images': {
           if (text.toLowerCase() === 'done') {
@@ -991,17 +1086,27 @@ const handleAdminPanelUpsert = async (messages) => {
             return;
           }
 
+          await sendSafeMessage(remoteJid, "🤖 AI is generating description, matching brand, and analyzing category from the product name... Please wait.");
+
+          const existingBrands = await getExistingBrands();
+          const aiResult = await analyzeProductWithAI(session.data.name, existingBrands);
+
+          session.data.brand = aiResult.brand;
+          session.data.category = aiResult.category;
+          session.data.description = aiResult.description;
+
           session.step = 'confirming';
           const summary = `📝 *Product Summary* 📝\n\n` +
             `*Name:* ${session.data.name}\n` +
-            `*Description:* ${session.data.description}\n` +
+            `*AI Category:* ${session.data.category}\n` +
+            `*AI Brand:* ${session.data.brand}\n` +
             `*Price:* KES ${session.data.price}\n` +
-            `*Category:* ${session.data.category}\n` +
-            `*Brand:* ${session.data.brand}\n` +
+            `*Stock:* ${session.data.stock}\n` +
             `*Sizes:* ${session.data.sizes.join(', ') || 'None'}\n` +
             `*Colors:* ${session.data.colors.join(', ') || 'None'}\n` +
             `*Images:* ${session.data.imagePaths.length} attached\n` +
-            `*AI Background Removal:* ${session.data.runBgRemoval ? 'Enabled ✅' : 'Disabled ❌'}\n\n` +
+            `*AI Background Removal:* ${session.data.runBgRemoval ? 'Enabled ✅' : 'Disabled ❌'}\n` +
+            `*AI Description:* _${session.data.description}_\n\n` +
             `Reply *yes* to confirm and upload, or *no* to start over:`;
           await sendSafeMessage(remoteJid, summary);
           break;
@@ -1019,6 +1124,7 @@ const handleAdminPanelUpsert = async (messages) => {
                 brand: session.data.brand,
                 sizes: session.data.sizes,
                 colors: session.data.colors,
+                stock: session.data.stock,
                 status: 'processing'
               });
 
