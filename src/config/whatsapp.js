@@ -756,8 +756,8 @@ const handleAdminPanelUpsert = async (messages) => {
       const { authorizedPhones, authorizedLids } = await loadAuthorizedIdentifiers();
       const isSenderAdmin = isSenderAuthorized(senderId, authorizedPhones, authorizedLids);
 
-      // Gate: sender must be an authorized admin
-      if (!isSenderAdmin) continue;
+      // Gate: sender must be an authorized admin, OR the message must come from the admin group
+      if (!isSenderAdmin && !isFromAdminGroup) continue;
 
       const text = (
         msg.message?.conversation ||
