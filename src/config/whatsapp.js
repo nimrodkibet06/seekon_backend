@@ -913,11 +913,15 @@ const handleAdminPanelUpsert = async (messages) => {
             `When entering sizes, you can specify ranges like *35-45*. The bot will automatically expand it to include all sizes in between (*35, 36, 37... 45*). You can also mix them: *S, M, 35-40, L*.\n\n` +
             `*Upload Guide:*\n` +
             `1. Start the session using *!addproduct*.\n` +
-            `2. Answer the prompts with name, description, price, category, and brand.\n` +
-            `3. Input sizes (e.g. *35-45* or *S, M, L*) and colors.\n` +
-            `4. Upload product images one by one.\n` +
-            `5. Type *done* when finished uploading images.\n` +
-            `6. Confirm the upload summary by replying *yes*.`;
+            `2. Input the Product Name, Price (commas are supported), Sizes, and Colors.\n` +
+            `3. Set the Stock count (defaults to 200 if skipped).\n` +
+            `4. Send product images one by one, then type *done*.\n` +
+            `5. Choose whether to run AI Background Removal (yes/no).\n` +
+            `6. Verify the AI-generated details on the summary screen. Confirm by replying *yes*, or start over with *no*.\n\n` +
+            `*Edit Option:*\n` +
+            `If any details are incorrect on the summary screen, edit them directly by typing:\n` +
+            `👉 *edit <field> <value>*\n` +
+            `_(e.g., *edit price 8,000* or *edit stock 150* or *edit name New Nike Shoes*)_`;
           await sendSafeMessage(remoteJid, helpMessage);
           return;
         }
@@ -976,7 +980,8 @@ const handleAdminPanelUpsert = async (messages) => {
           break;
 
         case 'awaiting_price': {
-          const price = parseFloat(text);
+          const priceStr = text.replace(/,/g, '').trim();
+          const price = parseFloat(priceStr);
           if (isNaN(price) || price < 0) {
             await sendSafeMessage(remoteJid, "⚠️ Invalid price. Please reply with a valid number for the *Product Price*:");
             return;
@@ -1111,12 +1116,107 @@ const handleAdminPanelUpsert = async (messages) => {
             `*Images:* ${session.data.imagePaths.length} attached\n` +
             `*AI Background Removal:* ${session.data.runBgRemoval ? 'Enabled ✅' : 'Disabled ❌'}\n` +
             `*AI Description:* _${session.data.description}_\n\n` +
-            `Reply *yes* to confirm and upload, or *no* to start over:`;
+            `Reply *yes* to confirm and upload, or *no* to start over.\n\n` +
+            `💡 To edit a field, type: *edit <field> <value>*\n` +
+            `(e.g. *edit price 8,000* or *edit stock 150*)`;
           await sendSafeMessage(remoteJid, summary);
           break;
         }
 
-        case 'confirming':
+        case 'confirming': {
+          const editMatch = text.match(/^\/?edit\s+(\w+)\s+(.+)$/i);
+          if (editMatch) {
+            const field = editMatch[1].toLowerCase();
+            const value = editMatch[2].trim();
+
+            if (field === 'price') {
+              const priceStr = value.replace(/,/g, '').trim();
+              const price = parseFloat(priceStr);
+              if (isNaN(price) || price < 0) {
+                await sendSafeMessage(remoteJid, "⚠️ Invalid price format. Example: *edit price 8,000*");
+                return;
+              }
+              session.data.price = price;
+              await sendSafeMessage(remoteJid, `✅ Price updated to KES ${price}.`);
+            } else if (field === 'name') {
+              if (!value) {
+                await sendSafeMessage(remoteJid, "⚠️ Name cannot be empty.");
+                return;
+              }
+              session.data.name = value;
+              await sendSafeMessage(remoteJid, "⏳ Product name updated. Re-running AI analysis for brand, category, and description...");
+              const existingBrands = await getExistingBrands();
+              const aiResult = await analyzeProductWithAI(session.data.name, existingBrands);
+              session.data.brand = aiResult.brand;
+              session.data.category = aiResult.category;
+              session.data.description = aiResult.description;
+              await sendSafeMessage(remoteJid, "✅ AI analysis completed.");
+            } else if (field === 'sizes') {
+              const expandedSizes = [];
+              if (value.toLowerCase() !== 'none') {
+                const parts = value.split(',');
+                for (const part of parts) {
+                  const trimmed = part.trim();
+                  if (!trimmed) continue;
+                  const rangeMatch = trimmed.match(/^(\d+)-(\d+)$/);
+                  if (rangeMatch) {
+                    const start = parseInt(rangeMatch[1], 10);
+                    const end = parseInt(rangeMatch[2], 10);
+                    if (start <= end && (end - start) <= 100) {
+                      for (let i = start; i <= end; i++) expandedSizes.push(String(i));
+                    } else {
+                      expandedSizes.push(trimmed);
+                    }
+                  } else {
+                    expandedSizes.push(trimmed);
+                  }
+                }
+              }
+              session.data.sizes = expandedSizes;
+              await sendSafeMessage(remoteJid, `✅ Sizes updated to: ${expandedSizes.join(', ') || 'None'}`);
+            } else if (field === 'colors') {
+              const colors = value.toLowerCase() === 'none' ? [] : value.split(',').map(c => c.trim()).filter(Boolean);
+              session.data.colors = colors;
+              await sendSafeMessage(remoteJid, `✅ Colors updated to: ${colors.join(', ') || 'None'}`);
+            } else if (field === 'stock') {
+              let stock = parseInt(value, 10);
+              if (isNaN(stock) || stock < 0 || value.toLowerCase() === 'none') {
+                stock = 200;
+              }
+              session.data.stock = stock;
+              await sendSafeMessage(remoteJid, `✅ Stock updated to ${stock}.`);
+            } else if (field === 'bg' || field === 'background' || field === 'ai') {
+              const bgVal = value.toLowerCase();
+              if (bgVal === 'yes' || bgVal === 'y' || bgVal === 'true' || bgVal === 'enabled') {
+                session.data.runBgRemoval = true;
+              } else {
+                session.data.runBgRemoval = false;
+              }
+              await sendSafeMessage(remoteJid, `✅ AI Background Removal set to: ${session.data.runBgRemoval ? 'Enabled' : 'Disabled'}`);
+            } else {
+              await sendSafeMessage(remoteJid, "⚠️ Unknown field. Available fields to edit: *name*, *price*, *sizes*, *colors*, *stock*, *bg*.\n\nExample: *edit price 8000*");
+              return;
+            }
+
+            // Reshow the summary
+            const summary = `📝 *Updated Product Summary* 📝\n\n` +
+              `*Name:* ${session.data.name}\n` +
+              `*AI Category:* ${session.data.category}\n` +
+              `*AI Brand:* ${session.data.brand}\n` +
+              `*Price:* KES ${session.data.price}\n` +
+              `*Stock:* ${session.data.stock}\n` +
+              `*Sizes:* ${session.data.sizes.join(', ') || 'None'}\n` +
+              `*Colors:* ${session.data.colors.join(', ') || 'None'}\n` +
+              `*Images:* ${session.data.imagePaths.length} attached\n` +
+              `*AI Background Removal:* ${session.data.runBgRemoval ? 'Enabled ✅' : 'Disabled ❌'}\n` +
+              `*AI Description:* _${session.data.description}_\n\n` +
+              `Reply *yes* to confirm and upload, or *no* to start over.\n\n` +
+              `💡 To edit a field, type: *edit <field> <value>*\n` +
+              `(e.g. *edit price 8,000* or *edit stock 150*)`;
+            await sendSafeMessage(remoteJid, summary);
+            return;
+          }
+
           if (text.toLowerCase() === 'yes') {
             await sendSafeMessage(remoteJid, "⏳ Saving product and queueing image processing job...");
             try {
@@ -1163,6 +1263,7 @@ const handleAdminPanelUpsert = async (messages) => {
             await sendSafeMessage(remoteJid, "⚠️ Invalid input. Reply *yes* to confirm and upload, or *no* to cancel.");
           }
           break;
+        }
       }
     } catch (err) {
       console.error("🔥 [WA-ADMIN-PANEL ERROR]:", err.message || err);
