@@ -854,6 +854,56 @@ Do NOT wrap the response in markdown blocks like \`\`\`json. Output raw JSON str
   }
 };
 
+/**
+ * parseProductPromptWithAI — Calls Groq (llama-3.3-70b-versatile) to parse a single-sentence product prompt
+ * into name, price, sizes, colors, and stock in JSON mode.
+ */
+const parseProductPromptWithAI = async (sentence) => {
+  try {
+    const groq = getGroqClient();
+    
+    const systemPrompt = `You are a product parser for Seekon catalog.
+Parse the following natural language sentence and extract the product details:
+- name: The name of the product (e.g. "Nike Air Jordan 4 Black/White")
+- price: The price of the product as a number (e.g. 8000). Extract from terms like "price 8000", "8,000", "8k", "8000 kes", etc.
+- sizes: A comma-separated string of sizes or size ranges (e.g. "36-40" or "S, M, L").
+- colors: A comma-separated string of colors (e.g. "Black, White" or "none").
+- stock: The stock count as a number (default 200 if not found).
+
+You must reply with a valid JSON object ONLY. The JSON keys must be:
+- "name": string
+- "price": number or null
+- "sizes": string or null
+- "colors": string or null
+- "stock": number
+
+Do NOT wrap the response in markdown blocks like \`\`\`json. Output raw JSON string only.`;
+
+    const response = await groq.chat.completions.create({
+      model: "llama-3.3-70b-versatile",
+      messages: [
+        { role: "system", content: systemPrompt },
+        { role: "user", content: sentence }
+      ],
+      response_format: { type: "json_object" }
+    });
+
+    const resultText = response.choices[0]?.message?.content || "{}";
+    const data = JSON.parse(resultText);
+    
+    return {
+      name: data.name || '',
+      price: data.price || null,
+      sizes: data.sizes || '',
+      colors: data.colors || '',
+      stock: typeof data.stock === 'number' ? data.stock : 200
+    };
+  } catch (err) {
+    console.error('Error parsing product sentence with AI:', err);
+    return null;
+  }
+};
+
 // ─────────────────────────────────────────────────────────────────────────────
 // Conversational WhatsApp Admin Panel — accepts product uploads from admins.
 // ─────────────────────────────────────────────────────────────────────────────
@@ -927,9 +977,11 @@ const handleAdminPanelUpsert = async (messages) => {
         }
 
         const startCommands = ['!addproduct', '/addproduct', 'add product', 'new product'];
-        const isStartCommand = startCommands.some(cmd => text.toLowerCase().startsWith(cmd));
+        const matchedStart = startCommands.find(cmd => text.toLowerCase().startsWith(cmd));
 
-        if (isStartCommand) {
+        if (matchedStart) {
+          const sentence = text.slice(matchedStart.length).trim();
+          
           session = {
             step: 'awaiting_name',
             data: {
@@ -942,6 +994,58 @@ const handleAdminPanelUpsert = async (messages) => {
               runBgRemoval: true
             }
           };
+
+          if (sentence) {
+            await sendSafeMessage(remoteJid, "🤖 AI is parsing your product sentence... Please wait.");
+            const parsed = await parseProductPromptWithAI(sentence);
+            if (parsed && parsed.name && parsed.price) {
+              session.data.name = parsed.name;
+              session.data.price = parsed.price;
+              session.data.stock = parsed.stock;
+              
+              const expandedSizes = [];
+              if (parsed.sizes && parsed.sizes.toLowerCase() !== 'none') {
+                const parts = parsed.sizes.split(',');
+                for (const part of parts) {
+                  const trimmed = part.trim();
+                  if (!trimmed) continue;
+                  const rangeMatch = trimmed.match(/^(\d+)-(\d+)$/);
+                  if (rangeMatch) {
+                    const start = parseInt(rangeMatch[1], 10);
+                    const end = parseInt(rangeMatch[2], 10);
+                    if (start <= end && (end - start) <= 100) {
+                      for (let i = start; i <= end; i++) expandedSizes.push(String(i));
+                    } else {
+                      expandedSizes.push(trimmed);
+                    }
+                  } else {
+                    expandedSizes.push(trimmed);
+                  }
+                }
+              }
+              session.data.sizes = expandedSizes;
+              
+              if (parsed.colors && parsed.colors.toLowerCase() !== 'none') {
+                session.data.colors = parsed.colors.split(',').map(c => c.trim()).filter(Boolean);
+              }
+              
+              session.step = 'awaiting_images';
+              adminUploadSessions.set(senderId, session);
+              
+              const parsedMsg = `🤖 *AI Parsed Details:* \n\n` +
+                `*Name:* ${session.data.name}\n` +
+                `*Price:* KES ${session.data.price}\n` +
+                `*Sizes:* ${session.data.sizes.join(', ') || 'None'}\n` +
+                `*Colors:* ${session.data.colors.join(', ') || 'None'}\n` +
+                `*Stock:* ${session.data.stock}\n\n` +
+                `📸 Please upload/send the *Product Image(s)* now (you can send multiple images in a batch). Reply *done* when finished:`;
+              await sendSafeMessage(remoteJid, parsedMsg);
+              return;
+            } else {
+              await sendSafeMessage(remoteJid, "⚠️ AI was unable to parse name and price clearly from the sentence. Falling back to step-by-step prompts.");
+            }
+          }
+
           adminUploadSessions.set(senderId, session);
           await sendSafeMessage(remoteJid, "📦 *Seekon WhatsApp Admin Panel* 📦\n\nStarting product upload session. Type *cancel* at any time to abort.\n\n👉 Please reply with the *Product Name*:");
           return;
