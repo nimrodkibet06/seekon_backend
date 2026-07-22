@@ -1256,21 +1256,32 @@ export const sendSafeMessage = async (_ignored, phone, message, attempt = 1) => 
     throw new Error('WhatsApp Client is offline or not authenticated yet.');
   }
 
+  let finalPhone = phone;
+  let finalMessage = message;
+
+  // Auto-shift arguments if called as sendSafeMessage(jid, text) instead of sendSafeMessage(null, jid, text)
+  if (typeof _ignored === 'string' && typeof phone === 'string' && message === undefined) {
+    finalPhone = _ignored;
+    finalMessage = phone;
+  }
+
   try {
     let chatId;
-    if (phone === 'me' || phone === 'self') {
+    if (finalPhone === 'me' || finalPhone === 'self') {
       const ownJid = sock.user?.id;
       if (!ownJid) throw new Error('Bot JID not yet loaded — cannot message self.');
       chatId = ownJid;
+    } else if (finalPhone && (finalPhone.endsWith('@s.whatsapp.net') || finalPhone.endsWith('@g.us'))) {
+      chatId = finalPhone;
     } else {
-      chatId = formatPhoneToJid(phone);
+      chatId = formatPhoneToJid(finalPhone);
     }
 
     console.log(`📱 [WA-SEND]: Routing to ${chatId} (Attempt ${attempt}/3)`);
 
     // STEP 2 — Human-like jitter + composing presence before every send
     await humanDelay(1500, 5000);
-    await simulateTyping(chatId, message);
+    await simulateTyping(chatId, finalMessage);
 
     const withTimeout = (promise, ms, label) => Promise.race([
       promise,
@@ -1280,7 +1291,7 @@ export const sendSafeMessage = async (_ignored, phone, message, attempt = 1) => 
     ]);
 
     const result = await withTimeout(
-      sock.sendMessage(chatId, { text: message }),
+      sock.sendMessage(chatId, { text: finalMessage }),
       60000,
       'sendMessage'
     );
