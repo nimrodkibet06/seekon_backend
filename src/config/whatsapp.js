@@ -892,15 +892,35 @@ Do NOT wrap the response in markdown blocks like \`\`\`json. Output raw JSON str
     const data = JSON.parse(resultText);
     
     return {
-      name: data.name || '',
+      name: data.name || null,
       price: data.price || null,
-      sizes: data.sizes || '',
-      colors: data.colors || '',
-      stock: typeof data.stock === 'number' ? data.stock : 200
+      sizes: data.sizes || null,
+      colors: data.colors || null,
+      stock: typeof data.stock === 'number' ? data.stock : null
     };
   } catch (err) {
     console.error('Error parsing product sentence with AI:', err);
     return null;
+  }
+};
+
+/**
+ * askNextClarifyingField — Prompts the admin for the next missing field in the queue.
+ */
+const askNextClarifyingField = async (remoteJid, session) => {
+  const nextField = session.data.missingFields[0];
+  session.data.currentClarifyingField = nextField;
+  
+  if (nextField === 'name') {
+    await sendSafeMessage(remoteJid, "🤖 *Product Name* was not found in your statement. Please reply with the *Product Name*:");
+  } else if (nextField === 'price') {
+    await sendSafeMessage(remoteJid, "🤖 *Product Price* was not found in your statement. Please reply with the *Product Price* (numbers only, e.g., 1500):");
+  } else if (nextField === 'sizes') {
+    await sendSafeMessage(remoteJid, "🤖 *Sizes* were not found in your statement. Please reply with the *Sizes* (comma-separated, e.g., S, M, L or 35-45 or reply *none* to skip):");
+  } else if (nextField === 'colors') {
+    await sendSafeMessage(remoteJid, "🤖 *Colors* were not found in your statement. Please reply with the *Colors* (comma-separated or reply *none* to skip):");
+  } else if (nextField === 'stock') {
+    await sendSafeMessage(remoteJid, "🤖 *Stock count* was not found in your statement. Please reply with the *Stock count* (or reply *none* to default to 200):");
   }
 };
 
@@ -976,7 +996,7 @@ const handleAdminPanelUpsert = async (messages) => {
           return;
         }
 
-        const startCommands = ['!addproduct', '/addproduct', 'add product', 'new product'];
+        const startCommands = ['/add product', '!add product', '/addproduct', '!addproduct', 'add product', 'new product'];
         const matchedStart = startCommands.find(cmd => text.toLowerCase().startsWith(cmd));
 
         if (matchedStart) {
@@ -991,18 +1011,28 @@ const handleAdminPanelUpsert = async (messages) => {
               colors: [],
               stock: 200,
               imagePaths: [],
-              runBgRemoval: true
+              runBgRemoval: true,
+              missingFields: []
             }
           };
 
           if (sentence) {
             await sendSafeMessage(remoteJid, "🤖 AI is parsing your product sentence... Please wait.");
             const parsed = await parseProductPromptWithAI(sentence);
-            if (parsed && parsed.name && parsed.price) {
-              session.data.name = parsed.name;
-              session.data.price = parsed.price;
-              session.data.stock = parsed.stock;
+            if (parsed) {
+              session.data.name = parsed.name || '';
+              session.data.price = parsed.price || 0;
+              session.data.stock = parsed.stock !== null ? parsed.stock : 200;
               
+              // Compile missing fields queue
+              const missingFields = [];
+              if (!parsed.name) missingFields.push('name');
+              if (!parsed.price) missingFields.push('price');
+              if (!parsed.sizes || parsed.sizes.toLowerCase() === 'none') missingFields.push('sizes');
+              if (!parsed.colors || parsed.colors.toLowerCase() === 'none') missingFields.push('colors');
+              
+              session.data.missingFields = missingFields;
+
               const expandedSizes = [];
               if (parsed.sizes && parsed.sizes.toLowerCase() !== 'none') {
                 const parts = parsed.sizes.split(',');
@@ -1029,25 +1059,38 @@ const handleAdminPanelUpsert = async (messages) => {
                 session.data.colors = parsed.colors.split(',').map(c => c.trim()).filter(Boolean);
               }
               
-              session.step = 'awaiting_images';
               adminUploadSessions.set(senderId, session);
-              
-              const parsedMsg = `🤖 *AI Parsed Details:* \n\n` +
-                `*Name:* ${session.data.name}\n` +
-                `*Price:* KES ${session.data.price}\n` +
-                `*Sizes:* ${session.data.sizes.join(', ') || 'None'}\n` +
-                `*Colors:* ${session.data.colors.join(', ') || 'None'}\n` +
-                `*Stock:* ${session.data.stock}\n\n` +
-                `📸 Please upload/send the *Product Image(s)* now (you can send multiple images in a batch). Reply *done* when finished:`;
-              await sendSafeMessage(remoteJid, parsedMsg);
-              return;
+
+              if (missingFields.length > 0) {
+                session.step = 'clarifying';
+                let parsedSummary = `🤖 *AI Parsed Partial Details:* \n`;
+                if (session.data.name) parsedSummary += `- *Name:* ${session.data.name}\n`;
+                if (session.data.price) parsedSummary += `- *Price:* KES ${session.data.price}\n`;
+                if (session.data.sizes.length > 0) parsedSummary += `- *Sizes:* ${session.data.sizes.join(', ')}\n`;
+                if (session.data.colors.length > 0) parsedSummary += `- *Colors:* ${session.data.colors.join(', ')}\n`;
+                parsedSummary += `\nLet's clarify the remaining fields:`;
+                await sendSafeMessage(remoteJid, parsedSummary);
+                await askNextClarifyingField(remoteJid, session);
+                return;
+              } else {
+                session.step = 'awaiting_images';
+                const parsedMsg = `🤖 *AI Parsed Details:* \n\n` +
+                  `*Name:* ${session.data.name}\n` +
+                  `*Price:* KES ${session.data.price}\n` +
+                  `*Sizes:* ${session.data.sizes.join(', ') || 'None'}\n` +
+                  `*Colors:* ${session.data.colors.join(', ') || 'None'}\n` +
+                  `*Stock:* ${session.data.stock}\n\n` +
+                  `📸 Please upload/send the *Product Image(s)* now (you can send multiple images in a batch). Reply *done* when finished:`;
+                await sendSafeMessage(remoteJid, parsedMsg);
+                return;
+              }
             } else {
-              await sendSafeMessage(remoteJid, "⚠️ AI was unable to parse name and price clearly from the sentence. Falling back to step-by-step prompts.");
+              await sendSafeMessage(remoteJid, "⚠️ AI was unable to parse the sentence. Falling back to step-by-step prompts.");
             }
           }
 
           adminUploadSessions.set(senderId, session);
-          await sendSafeMessage(remoteJid, "📦 *Seekon WhatsApp Admin Panel* 📦\n\nStarting product upload session. Type *cancel* at any time to abort.\n\n👉 Please reply with the *Product Name*:");
+          await sendSafeMessage(remoteJid, "📦 *Seekon WhatsApp Admin Panel* 📦\n\nStarting product upload session. Type *cancel* at any time to abort.\n\n👉 Please reply with the *Product Name*:\n\n💡 *Quick Tip*: You can also upload in one go! Next time, try sending:\n*/add product Nike Dunk Low Retro, price 8,500, sizes 36-45, colors panda, stock 150*");
           return;
         }
         continue;
@@ -1073,6 +1116,69 @@ const handleAdminPanelUpsert = async (messages) => {
 
       // 3. Conversational State Machine
       switch (session.step) {
+        case 'clarifying': {
+          const field = session.data.currentClarifyingField;
+          
+          if (field === 'name') {
+            if (!text) {
+              await sendSafeMessage(remoteJid, "⚠️ Invalid input. Please reply with the *Product Name*:");
+              return;
+            }
+            session.data.name = text;
+          } else if (field === 'price') {
+            const priceStr = text.replace(/,/g, '').trim();
+            const price = parseFloat(priceStr);
+            if (isNaN(price) || price < 0) {
+              await sendSafeMessage(remoteJid, "⚠️ Invalid price. Please reply with a valid number for the *Product Price*:");
+              return;
+            }
+            session.data.price = price;
+          } else if (field === 'sizes') {
+            const expandedSizes = [];
+            if (text && text.toLowerCase() !== 'none') {
+              const parts = text.split(',');
+              for (const part of parts) {
+                const trimmed = part.trim();
+                if (!trimmed) continue;
+                const rangeMatch = trimmed.match(/^(\d+)-(\d+)$/);
+                if (rangeMatch) {
+                  const start = parseInt(rangeMatch[1], 10);
+                  const end = parseInt(rangeMatch[2], 10);
+                  if (start <= end && (end - start) <= 100) {
+                    for (let i = start; i <= end; i++) expandedSizes.push(String(i));
+                  } else {
+                    expandedSizes.push(trimmed);
+                  }
+                } else {
+                  expandedSizes.push(trimmed);
+                }
+              }
+            }
+            session.data.sizes = expandedSizes;
+          } else if (field === 'colors') {
+            if (text && text.toLowerCase() !== 'none') {
+              session.data.colors = text.split(',').map(c => c.trim()).filter(Boolean);
+            }
+          } else if (field === 'stock') {
+            let stock = parseInt(text, 10);
+            if (isNaN(stock) || stock < 0 || text.toLowerCase() === 'none') {
+              stock = 200;
+            }
+            session.data.stock = stock;
+          }
+
+          // Move to next missing field
+          session.data.missingFields.shift();
+          
+          if (session.data.missingFields.length > 0) {
+            await askNextClarifyingField(remoteJid, session);
+          } else {
+            session.step = 'awaiting_images';
+            await sendSafeMessage(remoteJid, `📸 All details loaded successfully! Please upload/send the *Product Image(s)* now (you can send multiple images in a batch). Reply *done* when finished:`);
+          }
+          break;
+        }
+
         case 'awaiting_name':
           if (!text) {
             await sendSafeMessage(remoteJid, "⚠️ Invalid input. Please reply with the *Product Name*:");
