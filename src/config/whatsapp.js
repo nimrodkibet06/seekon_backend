@@ -109,7 +109,8 @@ const MAX_CACHE_SIZE = 500;
 
 const activeSessions = new Map();
 const adminUploadSessions = new Map();
-const adminGroupJid = process.env.ADMIN_GROUP_JID;
+const rawGroupJid = process.env.ADMIN_GROUP_JID || process.env.ADMIN_WHATSAPP_GROUP_ID || '';
+const adminGroupJid = rawGroupJid.replace(/['"]/g, '').trim();
 const imageQueue = new Queue('imageQueue', { connection: { host: '127.0.0.1', port: 6379 } });
 
 // Seekon Product Schema for WhatsApp Admin Panel writes
@@ -750,6 +751,19 @@ const handleAdminPanelUpsert = async (messages) => {
       const isFromAdminGroup = adminGroupJid && remoteJid === adminGroupJid;
       const isDM = remoteJid.endsWith('@s.whatsapp.net');
 
+      // Extract text content early for debugging/logging
+      const text = (
+        msg.message?.conversation ||
+        msg.message?.extendedTextMessage?.text ||
+        msg.message?.imageMessage?.caption ||
+        ''
+      ).trim();
+
+      // Debug log to trace incoming messages from DMs and any groups
+      if (isDM || isFromAdminGroup || remoteJid.endsWith('@g.us')) {
+        console.log(`📩 [WA-ADMIN-PANEL DEBUG]: remoteJid: "${remoteJid}", senderId: "${senderId}", isDM: ${isDM}, isFromAdminGroup: ${isFromAdminGroup}, configJid: "${adminGroupJid}", text: "${text}"`);
+      }
+
       // Gate: only allow private DMs or messages within the specific Admin Group JID
       if (!isDM && !isFromAdminGroup) continue;
 
@@ -758,13 +772,6 @@ const handleAdminPanelUpsert = async (messages) => {
 
       // Gate: sender must be an authorized admin, OR the message must come from the admin group
       if (!isSenderAdmin && !isFromAdminGroup) continue;
-
-      const text = (
-        msg.message?.conversation ||
-        msg.message?.extendedTextMessage?.text ||
-        msg.message?.imageMessage?.caption ||
-        ''
-      ).trim();
 
       const isImage = !!(msg.message?.imageMessage);
       let session = adminUploadSessions.get(senderId);
