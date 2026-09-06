@@ -1082,7 +1082,16 @@ const handleAdminPanelUpsert = async (messages) => {
   for (const msg of messages) {
     try {
       const remoteJid = msg.key?.remoteJid || '';
-      const senderId = msg.key?.participant || msg.key?.remoteJid || '';
+
+      // ── Linked-device support ────────────────────────────────────────────
+      // When the admin types from a linked device (WhatsApp Web / secondary phone),
+      // msg.key.fromMe = true and msg.key.participant is undefined for DMs.
+      // In that case msg.key.remoteJid is the RECIPIENT, not the sender.
+      // We resolve senderId to the bot's own JID for fromMe DMs so auth passes.
+      const isFromMe = msg.key?.fromMe === true;
+      const getBareJid = (jid) => jid ? jid.split('@')[0].split(':')[0] + '@s.whatsapp.net' : '';
+      const botOwnJid = sock?.user?.id ? getBareJid(sock.user.id) : '';
+      const senderId = msg.key?.participant || (isFromMe ? botOwnJid : msg.key?.remoteJid) || '';
 
       if (msg.key?.id && sentMessageIds.has(msg.key.id)) continue;
 
@@ -1099,9 +1108,8 @@ const handleAdminPanelUpsert = async (messages) => {
       if (!isDM && !isFromAdminGroup) continue;
 
       const { authorizedPhones, authorizedLids } = await loadAuthorizedIdentifiers();
-      const getBareJid = (jid) => jid ? jid.split('@')[0].split(':')[0] + '@s.whatsapp.net' : '';
-      const botOwnJid = sock?.user?.id ? getBareJid(sock.user.id) : '';
-      const isSenderOwnNumber = botOwnJid && getBareJid(senderId) === botOwnJid;
+      // fromMe = message was sent FROM this device/linked device → always admin
+      const isSenderOwnNumber = isFromMe || (botOwnJid && getBareJid(senderId) === botOwnJid);
       const isSenderAdmin = isSenderOwnNumber || isSenderAuthorized(senderId, authorizedPhones, authorizedLids);
 
       if (!isSenderAdmin && !isFromAdminGroup) continue;
