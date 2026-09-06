@@ -770,7 +770,7 @@ const getExistingBrands = async () => {
 };
 
 /**
- * analyzeProductWithAI — Calls Groq (llama-3.3-70b-versatile) to deduce brand,
+ * analyzeProductWithAI — Calls Groq (llama-3.1-70b-versatile) to deduce brand,
  * category (Sneakers, Apparel, Accessories), and write a persuasive product description in JSON mode.
  */
 const analyzeProductWithAI = async (productName, existingBrands) => {
@@ -792,7 +792,7 @@ You must reply with a valid JSON object ONLY. The JSON keys must be:
 Do NOT wrap the response in markdown blocks like \`\`\`json. Output raw JSON string only.`;
 
     const response = await groq.chat.completions.create({
-      model: "llama-3.3-70b-versatile",
+      model: "llama-3.1-70b-versatile",
       messages: [
         { role: "system", content: systemPrompt },
         { role: "user", content: productName }
@@ -911,7 +911,7 @@ const cleanPrice = (val) => {
 };
 
 /**
- * processProductConversationWithAI — Uses Groq (llama-3.3-70b-versatile)
+ * processProductConversationWithAI — Uses Groq (llama-3.1-70b-versatile)
  * to intelligently analyze conversation for product upload requirements,
  * acknowledge provided details, request missing pieces naturally,
  * and handle natural updates without strict commas or rigid formatting.
@@ -985,7 +985,7 @@ Do NOT wrap in markdown code fences like \`\`\`json. Output raw JSON string only
     ];
 
     const response = await groq.chat.completions.create({
-      model: "llama-3.3-70b-versatile",
+      model: "llama-3.1-70b-versatile",
       messages,
       response_format: { type: "json_object" }
     });
