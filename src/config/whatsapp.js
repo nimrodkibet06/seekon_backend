@@ -1188,11 +1188,13 @@ const handleAdminPanelUpsert = async (messages) => {
       }
 
       if (!session) {
+        // Ultra-lenient start trigger.
+        // If it's a DM, ANY message from an admin starts/continues the conversational flow.
+        // In groups, we look for intent words or product attribute combos to avoid false positives.
         const isStartTrigger =
-          /^(?:!|\/)?(?:add\s*product|addproduct|new\s*product|upload\s*product|create\s*product)\b/i.test(text) ||
-          /\b(?:add|upload|create|post)\s+(?:a\s+)?(?:new\s+)?(?:product|shoe|sneaker|item|apparel|clothing|hoodie|jacket|tee|t-shirt)\b/i.test(text) ||
-          (/(?:price|kes|ksh|\d+k)\b/i.test(text) && /(?:size|sizes|colour|color)\b/i.test(text)) ||
-          (isDM && isImage);
+          isDM ||
+          /^(?:!|\/)?(?:add|upload|create|new|post)\b/i.test(text) ||
+          (/(?:price|kes|ksh|bob|\d+k)\b/i.test(text) && /(?:size|sizes|colour|color)\b/i.test(text));
 
         if (!isStartTrigger) continue;
 
@@ -1217,8 +1219,8 @@ const handleAdminPanelUpsert = async (messages) => {
         console.log(`📦 [WA-ADMIN]: Initialized new product upload session for ${senderId}`);
       } else {
         const isStartTrigger =
-          /^(?:!|\/)?(?:add\s*product|addproduct|new\s*product|upload\s*product|create\s*product)\b/i.test(text) ||
-          /^\b(?:add|upload|create|post)\s+(?:a\s+)?(?:new\s+)?(?:product|shoe|sneaker|item)\b/i.test(text);
+          /^(?:!|\/)?(?:add|upload|create|new|post)\b/i.test(text) ||
+          (isDM && !session.data.name && text.split(/\s+/).length < 5); // Empty session restart heuristc
 
         if (isStartTrigger && session.data.allDetailsCollected === false && !session.data.name) {
         } else if (isStartTrigger) {
