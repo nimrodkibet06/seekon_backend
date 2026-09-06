@@ -1,0 +1,31 @@
+﻿# Dependencies
+node_modules/
+
+# Environment variables — never commit secrets
+.env
+.env.*
+!.env.example
+
+# Baileys multi-file auth state
+auth/
+baileys_auth_info/
+auth_info_baileys/
+
+# WhatsApp browser session data (Chromium profile)
+whatsapp-session/
+whatsapp-session-test/
+
+# Upload queue / temp images
+uploads/
+
+# Logs
+*.log
+logs/
+
+# OS artifacts
+.DS_Store
+Thumbs.db
+
+# Editor
+.vscode/
+.idea/

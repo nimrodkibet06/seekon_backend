@@ -1,0 +1,64 @@
+{
+  "name": "seekon-backend",
+  "version": "1.0.0",
+  "description": "Backend API for Seekon Apparel",
+  "type": "module",
+  "main": "src/server.js",
+  "scripts": {
+    "dev": "nodemon --exec \"node --expose-gc\" src/server.js",
+    "start": "node --expose-gc src/server.js",
+    "worker": "node --expose-gc src/workers/imageWorker.js",
+    "start:all": "node --expose-gc src/server.js & node --expose-gc src/workers/imageWorker.js",
+    "create-admin": "node --expose-gc src/scripts/createAdmin.js",
+    "clean-test-data": "node --expose-gc src/scripts/cleanTestData.js",
+    "seed:smart": "node --expose-gc SmartSeed.js",
+    "seed:stock": "node --expose-gc updateStock.js"
+  },
+  "keywords": [
+    "seekon",
+    "api",
+    "backend",
+    "express"
+  ],
+  "author": "Seekon Apparel",
+  "license": "ISC",
+  "dependencies": {
+    "@imgly/background-removal-node": "^1.4.5",
+    "@whiskeysockets/baileys": "^7.0.0-rc13",
+    "axios": "^1.6.2",
+    "bcrypt": "^5.1.1",
+    "bcryptjs": "^3.0.3",
+    "bullmq": "^5.78.1",
+    "cloudinary": "^2.9.0",
+    "cors": "^2.8.5",
+    "disposable-email-blocklist": "^0.0.1",
+    "dotenv": "^16.3.1",
+    "express": "^4.18.2",
+    "express-async-handler": "^1.2.0",
+    "express-rate-limit": "^8.5.2",
+    "express-validator": "^7.3.2",
+    "google-auth-library": "^10.6.1",
+    "googleapis": "^171.4.0",
+    "groq-sdk": "^0.37.0",
+    "helmet": "^8.1.0",
+    "jsonwebtoken": "^9.0.2",
+    "mongoose": "^8.0.3",
+    "multer": "^1.4.5-lts.1",
+    "multer-storage-cloudinary": "^4.0.0",
+    "node-cron": "^4.2.1",
+    "nodemailer": "^9.0.3",
+    "pino": "^10.3.1",
+    "qrcode-terminal": "^0.12.0",
+    "resend": "^6.9.1",
+    "sharp": "^0.35.1",
+    "web-push": "^3.6.7"
+  },
+  "devDependencies": {
+    "nodemon": "^3.0.2"
+  },
+  "overrides": {
+    "lodash": "^4.18.1",
+    "tar": "^7.5.19",
+    "zod": "^3.23.8"
+  }
+}

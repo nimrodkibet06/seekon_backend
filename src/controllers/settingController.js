@@ -1,0 +1,346 @@
+import Setting from '../models/Setting.js';
+import Subscriber from '../models/Subscriber.js';
+import { sendContactEmail, sendNewsletterWelcome } from '../utils/email.js';
+import whatsappClient, { getRawClient, sendSafeMessage } from '../config/whatsapp.js';
+import { normalizePhone } from '../utils/phoneFormatter.js';
+
+// Get exchange rate (Public)
+export const getExchangeRate = async (req, res) => {
+  try {
+    const settings = await Setting.findOne({ key: 'exchangeRate' });
+    if (!settings) {
+      // Return default rate if not found
+      return res.status(200).json({ success: true, rate: 130 });
+    }
+    res.status(200).json({ success: true, rate: settings.value.rate });
+  } catch (error) {
+    console.error('❌ GET_EXCHANGE_RATE Error:', error.message);
+    res.status(500).json({ message: 'Error fetching exchange rate', error: error.message });
+  }
+};
+
+// Update exchange rate (Admin)
+export const updateExchangeRate = async (req, res) => {
+  try {
+    const { rate } = req.body;
+    
+    if (!rate || typeof rate !== 'number' || rate <= 0) {
+      return res.status(400).json({ message: 'Valid exchange rate is required' });
+    }
+
+    const settings = await Setting.findOneAndUpdate(
+      { key: 'exchangeRate' },
+      { 
+        key: 'exchangeRate',
+        value: { rate },
+        updatedAt: Date.now()
+      },
+      { new: true, upsert: true }
+    );
+    
+    res.status(200).json({ success: true, rate: settings.value.rate });
+  } catch (error) {
+    console.error('❌ UPDATE_EXCHANGE_RATE Error:', error.message);
+    res.status(500).json({ message: 'Error updating exchange rate', error: error.message });
+  }
+};
+
+// Get flash sale settings (Public)
+export const getFlashSaleSettings = async (req, res) => {
+  try {
+    const settings = await Setting.findOne({ key: 'flashSale' });
+    console.log('🔍 GET_FLASH_SALE_SETTINGS - Found:', settings ? settings.value : 'default');
+    if (!settings) {
+      // Default settings if not found
+      return res.status(200).json({ isActive: false, endTime: null });
+    }
+    // Return the value object directly
+    res.status(200).json(settings.value);
+  } catch (error) {
+    console.error('❌ GET_FLASH_SALE_SETTINGS Error:', error.message);
+    res.status(500).json({ message: 'Error fetching settings', error: error.message });
+  }
+};
+
+// Update flash sale settings (Admin)
+console.log('UPDATE_FLASH_SALE_SETTINGS', 'Endpoint Hit');
+export const updateFlashSaleSettings = async (req, res) => {
+  try {
+    console.log('UPDATE_FLASH_SALE_SETTINGS', req.body);
+    const { isActive, endTime } = req.body;
+    
+    const settings = await Setting.findOneAndUpdate(
+      { key: 'flashSale' },
+      { 
+        key: 'flashSale',
+        value: { isActive, endTime },
+        updatedAt: Date.now()
+      },
+      { new: true, upsert: true }
+    );
+    
+    console.log('UPDATED_FLASH_SALE_SETTINGS', settings);
+    res.status(200).json(settings.value);
+  } catch (error) {
+    res.status(500).json({ message: 'Error updating settings', error: error.message });
+  }
+};
+
+// GET Home Page Settings
+export const getHomeSettings = async (req, res) => {
+  try {
+    const settings = await Setting.findOne({ key: 'homePage' });
+    // Default values for a new setup
+    const defaults = {
+      heroVideoUrl: "",
+      heroHeading: "STEP INTO THE FUTURE",
+      heroSubtitle: "Discover the latest drops from Nike, Adidas, Jordan, and more.",
+      heroOverlayOpacity: 50, // 0-100%
+      heroHeight: 85, // 50-100vh
+      heroHeadingSize: "large", // small, medium, large, xlarge
+      showHeroBadge: true // boolean
+    };
+    
+    // Merge saved settings with defaults to ensure all fields exist
+    res.status(200).json(settings ? { ...defaults, ...settings.value } : defaults);
+  } catch (error) {
+    res.status(500).json({ message: 'Server error fetching home settings' });
+  }
+};
+
+// UPDATE Home Page Settings
+export const updateHomeSettings = async (req, res) => {
+  // Destructure all possible fields
+  const { heroVideoUrl, heroHeading, heroSubtitle, heroOverlayOpacity, heroHeight, heroHeadingSize, showHeroBadge } = req.body;
+
+  try {
+    const settings = await Setting.findOneAndUpdate(
+      { key: 'homePage' },
+      { key: 'homePage', value: { heroVideoUrl, heroHeading, heroSubtitle, heroOverlayOpacity, heroHeight, heroHeadingSize, showHeroBadge } },
+      { new: true, upsert: true }
+    );
+    res.status(200).json(settings.value);
+  } catch (error) {
+    res.status(500).json({ message: 'Server error updating home settings' });
+  }
+};
+
+// Submit Contact Form
+export const submitContactForm = async (req, res) => {
+  try {
+    const { firstName, lastName, email, subject, message } = req.body;
+
+    if (!firstName || !email || !message) {
+      return res.status(400).json({ success: false, message: 'Please fill in all required fields.' });
+    }
+
+    const fullName = `${firstName} ${lastName || ''}`.trim();
+    const result = await sendContactEmail(fullName, email, subject, message);
+
+    if (result.success) {
+      res.status(200).json({ success: true, message: 'Your message has been sent successfully!' });
+    } else {
+      res.status(500).json({ success: false, message: 'Failed to send message. Please try again later.' });
+    }
+  } catch (error) {
+    res.status(500).json({ success: false, message: 'Server error processing contact form.' });
+  }
+};
+
+// Subscribe to Newsletter
+export const subscribeNewsletter = async (req, res) => {
+  try {
+    const { email } = req.body;
+    if (!email || !/^\S+@\S+\.\S+$/.test(email)) {
+      return res.status(400).json({ success: false, message: 'Please provide a valid email address.' });
+    }
+    const existing = await Subscriber.findOne({ email });
+    if (existing) {
+      if (existing.status === 'unsubscribed') {
+        existing.status = 'subscribed';
+        await existing.save();
+        return res.status(200).json({ success: true, message: 'Welcome back! You have been re-subscribed.' });
+      }
+      return res.status(400).json({ success: false, message: 'You are already subscribed!' });
+    }
+    await Subscriber.create({ email });
+    // Send the welcome email in the background (don't await it so UI responds faster)
+    sendNewsletterWelcome(email);
+    res.status(201).json({ success: true, message: 'Successfully subscribed! Check your email for a surprise.' });
+  } catch (error) {
+    console.error('Newsletter error:', error);
+    res.status(500).json({ success: false, message: 'Server error. Please try again later.' });
+  }
+};
+
+// Get authorized phone numbers (Admin only)
+export const getAuthorizedPhones = async (req, res) => {
+  try {
+    const settings = await Setting.findOne({ key: 'authorized_status_phones' });
+    if (!settings) {
+      // Default empty array or fallback env if not found
+      const defaultPhones = process.env.AUTHORIZED_ADMIN_PHONES
+        ? process.env.AUTHORIZED_ADMIN_PHONES.split(',').map(num => num.trim()).filter(Boolean)
+        : ['254700000000', '254712345678'];
+      return res.status(200).json({ success: true, phones: defaultPhones });
+    }
+    res.status(200).json({ success: true, phones: settings.value.phones || [] });
+  } catch (error) {
+    console.error('❌ GET_AUTHORIZED_PHONES Error:', error.message);
+    res.status(500).json({ message: 'Error fetching authorized phones', error: error.message });
+  }
+};
+
+// Update authorized phone numbers (Admin only)
+export const updateAuthorizedPhones = async (req, res) => {
+  try {
+    const { phones } = req.body;
+    
+    if (!Array.isArray(phones)) {
+      return res.status(400).json({ message: 'Phones must be an array of phone numbers' });
+    }
+
+    // Clean and validate numbers: remove non-digits, convert local format to international (254)
+    const cleanedPhones = phones
+      .map(num => normalizePhone(num))
+      .filter(num => num && num.length >= 9);
+
+    const settings = await Setting.findOneAndUpdate(
+      { key: 'authorized_status_phones' },
+      { 
+        key: 'authorized_status_phones',
+        value: { phones: cleanedPhones },
+        updatedAt: Date.now()
+      },
+      { new: true, upsert: true }
+    );
+    
+    res.status(200).json({ success: true, phones: settings.value.phones });
+  } catch (error) {
+    console.error('❌ UPDATE_AUTHORIZED_PHONES Error:', error.message);
+    res.status(500).json({ message: 'Error updating authorized phones', error: error.message });
+  }
+};
+
+// Get pending LIDs that need admin approval (Admin only)
+export const getPendingLids = async (req, res) => {
+  try {
+    const [pendingSetting, approvedSetting] = await Promise.all([
+      Setting.findOne({ key: 'pending_status_lids' }),
+      Setting.findOne({ key: 'authorized_status_lids' })
+    ]);
+    const pending = pendingSetting?.value?.lids || [];
+    const approved = approvedSetting?.value?.lids || [];
+    res.status(200).json({ success: true, pending, approved });
+  } catch (error) {
+    res.status(500).json({ message: 'Error fetching LIDs', error: error.message });
+  }
+};
+
+// Approve a pending LID — moves it from pending to authorized (Admin only)
+export const approveLid = async (req, res) => {
+  try {
+    const { lid } = req.body;
+    if (!lid) return res.status(400).json({ message: 'lid is required' });
+    const cleanLid = String(lid).trim();
+    const fullLid = cleanLid.includes('@lid') ? cleanLid : `${cleanLid}@lid`;
+
+    // Add to authorized list
+    await Setting.findOneAndUpdate(
+      { key: 'authorized_status_lids' },
+      { $addToSet: { 'value.lids': fullLid }, $set: { updatedAt: Date.now() } },
+      { upsert: true }
+    );
+    // Remove from pending list
+    await Setting.findOneAndUpdate(
+      { key: 'pending_status_lids' },
+      { $pull: { 'value.lids': fullLid } }
+    );
+    res.status(200).json({ success: true, message: `LID ${fullLid} approved.` });
+  } catch (error) {
+    res.status(500).json({ message: 'Error approving LID', error: error.message });
+  }
+};
+
+// Remove an approved LID (Admin only)
+export const removeLid = async (req, res) => {
+  try {
+    const { lid } = req.body;
+    if (!lid) return res.status(400).json({ message: 'lid is required' });
+    const fullLid = String(lid).trim().includes('@lid') ? String(lid).trim() : `${String(lid).trim()}@lid`;
+    await Setting.findOneAndUpdate(
+      { key: 'authorized_status_lids' },
+      { $pull: { 'value.lids': fullLid } }
+    );
+    res.status(200).json({ success: true, message: `LID ${fullLid} removed.` });
+  } catch (error) {
+    res.status(500).json({ message: 'Error removing LID', error: error.message });
+  }
+};
+
+// Trigger automated self-status broadcast (Admin only)
+// Baileys version: constructs a mock WAMessage that matches the Baileys schema
+// and pipes it through the same handleStatusUpsert path via the live socket.
+export const triggerSelfStatus = async (req, res) => {
+  try {
+    console.log('🚀 [WA STATUS TRIGGER]: Triggering Baileys self-test event...');
+
+    const sock = getRawClient();
+    if (!sock) {
+      return res.status(400).json({ success: false, message: 'WhatsApp socket is not initialized or offline.' });
+    }
+
+    // Resolve own JID from the Baileys socket user object
+    const selfJid = sock.user?.id || '254727672772@s.whatsapp.net';
+
+    // A tiny 1×1 green pixel PNG, encoded as a raw media buffer (not base64)
+    const pixelBuffer = Buffer.from(
+      'iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mNk+M9QDwADhgGAWjR9awAAAABJRU5ErkJggg==',
+      'base64'
+    );
+
+    // Construct a Baileys-compatible WAMessage for status@broadcast
+    // The imageMessage stub is enough for handleStatusUpsert to detect a media payload;
+    // the downloadMediaMessage call inside processStatusMedia will use this buffer
+    // via the getMessage hook (our messageCache).
+    const mockWAMessage = {
+      key: {
+        remoteJid:   'status@broadcast',
+        participant: selfJid,
+        fromMe:      true,
+        id:          `SELF_TEST_${Date.now()}`,
+      },
+      messageTimestamp: Math.floor(Date.now() / 1000),
+      message: {
+        imageMessage: {
+          mimetype: 'image/png',
+          caption:  `Seekon Engine Self-Test #${Date.now().toString().slice(-4)}`,
+          // Provide a stub fileSha256 so Baileys structures are valid
+          fileSha256:          Buffer.alloc(32),
+          fileEncSha256:       Buffer.alloc(32),
+          mediaKey:            Buffer.alloc(32),
+          directPath:          '',
+          url:                 '',
+          fileLength:          { low: pixelBuffer.length, high: 0, unsigned: true },
+          jpegThumbnail:       pixelBuffer,
+        },
+      },
+    };
+
+    // Emit directly on the sock event bus — this fires the same
+    // messages.upsert listener that real statuses use.
+    console.log(`📱 [WA STATUS TRIGGER]: Emitting mock messages.upsert for ${selfJid}...`);
+    sock.ev.emit('messages.upsert', {
+      messages: [mockWAMessage],
+      type:     'notify',
+    });
+
+    res.status(200).json({
+      success: true,
+      message: 'Self-test status event emitted. Check server logs for processing result.',
+    });
+  } catch (error) {
+    console.error('❌ [WA STATUS TRIGGER] Error:', error.message);
+    res.status(500).json({ success: false, message: 'Failed to trigger self-test.', error: error.message });
+  }
+};

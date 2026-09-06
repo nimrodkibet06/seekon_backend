@@ -1,0 +1,696 @@
+import Product from '../models/Product.js';
+import SystemLog from '../models/SystemLog.js';
+import Order from '../models/Order.js';
+import { imageQueue } from '../queues/imageQueue.js';
+import { getGroqClient } from '../utils/groqProvider.js';
+
+
+// Safe parser helper for arrays in multipart/form-data
+const parseArray = (field) => {
+  if (!field) return [];
+  if (Array.isArray(field)) return field;
+  if (typeof field === 'string') {
+    if (field.startsWith('[') && field.endsWith(']')) {
+      try {
+        const parsed = JSON.parse(field);
+        if (Array.isArray(parsed)) return parsed;
+      } catch (e) {
+        // Fall back
+      }
+    }
+    return field.split(',').map(item => item.trim()).filter(Boolean);
+  }
+  return [];
+};
+
+// Helper function to calculate active price based on flash sale timing
+const calculateActivePrice = (product) => {
+  const now = new Date();
+  
+  // Check if flash sale is active
+  if (product.isFlashSale && 
+      product.flashSalePrice && 
+      product.saleStartTime && 
+      product.saleEndTime) {
+    const startTime = new Date(product.saleStartTime);
+    const endTime = new Date(product.saleEndTime);
+    
+    if (now >= startTime && now <= endTime) {
+      return {
+        active: true,
+        price: product.flashSalePrice,
+        originalPrice: product.price,
+        endTime: product.saleEndTime
+      };
+    }
+  }
+  
+  return {
+    active: false,
+    price: product.price,
+    originalPrice: null,
+    endTime: null
+  };
+};
+
+// Helper function to transform product with active pricing
+const transformProduct = (product) => {
+  const productObj = product.toObject ? product.toObject() : product;
+  const pricing = calculateActivePrice(productObj);
+  
+  return {
+    ...productObj,
+    activePrice: pricing.price,
+    originalPrice: pricing.originalPrice || productObj.price,
+    isOnFlashSale: pricing.active,
+    flashSaleEndTime: pricing.endTime
+  };
+};
+
+// Get All Products
+export const getAllProducts = async (req, res) => {
+  try {
+    const { page = 1, limit = 50, search, category, inStock } = req.query;
+
+    const query = {};
+    
+    // Non-admin requests should filter out products that are still in processing state
+    const isAdminRequest = req.originalUrl && req.originalUrl.includes('/admin');
+    if (!isAdminRequest) {
+      query.status = { $ne: 'processing' };
+    }
+    
+    if (search) {
+      query.$or = [
+        { name: { $regex: search, $options: 'i' } },
+        { brand: { $regex: search, $options: 'i' } },
+        { description: { $regex: search, $options: 'i' } }
+      ];
+    }
+    
+    if (category) query.category = category;
+    if (inStock !== undefined) query.inStock = inStock === 'true';
+
+    const products = await Product.find(query)
+      .sort({ createdAt: -1 })
+      .limit(limit * 1)
+      .skip((page - 1) * limit);
+
+    const total = await Product.countDocuments(query);
+
+    // Transform products with active pricing
+    const transformedProducts = products.map(transformProduct);
+
+    res.status(200).json({
+      success: true,
+      products: transformedProducts,
+      pagination: {
+        page: parseInt(page),
+        limit: parseInt(limit),
+        total,
+        pages: Math.ceil(total / limit)
+      }
+    });
+  } catch (error) {
+    console.error('Error fetching products:', error);
+    res.status(500).json({
+      success: false,
+      message: 'Failed to fetch products'
+    });
+  }
+};
+
+// Get Single Product
+export const getProduct = async (req, res) => {
+  try {
+    const product = await Product.findById(req.params.id);
+    
+    if (!product) {
+      return res.status(404).json({
+        success: false,
+        message: 'Product not found'
+      });
+    }
+
+    // Transform product with active pricing
+    const transformedProduct = transformProduct(product);
+
+    res.status(200).json({
+      success: true,
+      product: transformedProduct
+    });
+  } catch (error) {
+    console.error('Error fetching product:', error);
+    res.status(500).json({
+      success: false,
+      message: 'Failed to fetch product'
+    });
+  }
+};
+
+// Create Product
+export const createProduct = async (req, res) => {
+  try {
+    const imageFiles = req.files || [];
+    const imagePaths = imageFiles.map(file => file.path);
+
+    // Parse array fields correctly from multipart/form-data
+    const sizes = parseArray(req.body.sizes);
+    const colors = parseArray(req.body.colors);
+    const tags = parseArray(req.body.tags);
+
+    // Set initial processing state for product creation
+    const productData = {
+      ...req.body,
+      sizes,
+      colors,
+      tags,
+      image: '',
+      images: [],
+      status: imagePaths.length > 0 ? 'processing' : 'active'
+    };
+
+    const product = await Product.create(productData);
+
+    // Log action - with error handling to prevent crashes
+    try {
+      await SystemLog.create({
+        action: 'product_created',
+        actor: req.user?.email || 'system',
+        actorType: 'admin',
+        details: { productId: product._id },
+        module: 'product'
+      });
+    } catch (logError) {
+      console.error('Failed to create product log:', logError.message);
+      // Continue without crashing - product was created successfully
+    }
+
+    // Dispatch job to image queue if images are present
+    if (imagePaths.length > 0) {
+      const runBgRemoval = req.body.runAIBackgroundRemoval === 'true' || req.body.runAIBackgroundRemoval === true;
+      await imageQueue.add('processImages', {
+        productId: product._id.toString(),
+        imagePaths,
+        runAIBackgroundRemoval: runBgRemoval
+      });
+      console.log(`📦 [QUEUE] Image processing job added for product ${product._id} (AI Bg Removal: ${runBgRemoval})`);
+    }
+
+    // Respond to frontend immediately to allow the user to continue
+    res.status(200).json({
+      success: true,
+      message: 'Upload received. You can continue while the images are being processed.',
+      product
+    });
+  } catch (error) {
+    console.error('Error creating product:', error);
+    
+    // Handle Mongoose validation errors
+    if (error.name === 'ValidationError') {
+      const validationErrors = {};
+      for (const field in error.errors) {
+        validationErrors[field] = error.errors[field].message;
+      }
+      return res.status(400).json({
+        success: false,
+        message: 'Validation failed',
+        errors: validationErrors
+      });
+    }
+    
+    res.status(500).json({
+      success: false,
+      message: 'Failed to create product'
+    });
+  }
+};
+
+// Update Product
+export const updateProduct = async (req, res) => {
+  try {
+    const product = await Product.findByIdAndUpdate(
+      req.params.id,
+      req.body,
+      { new: true }
+    );
+
+    if (!product) {
+      return res.status(404).json({
+        success: false,
+        message: 'Product not found'
+      });
+    }
+
+    // Log action - with error handling to prevent crashes
+    try {
+      await SystemLog.create({
+        action: 'product_updated',
+        actor: req.user?.email || 'system',
+        actorType: 'admin',
+        details: { productId: product._id },
+        module: 'product'
+      });
+    } catch (logError) {
+      console.error('Failed to create product update log:', logError.message);
+      // Continue without crashing - product was updated successfully
+    }
+
+    res.status(200).json({
+      success: true,
+      message: 'Product updated successfully',
+      product
+    });
+  } catch (error) {
+    console.error('Error updating product:', error);
+    res.status(500).json({
+      success: false,
+      message: 'Failed to update product'
+    });
+  }
+};
+
+// Delete Product
+export const deleteProduct = async (req, res) => {
+  try {
+    const product = await Product.findByIdAndDelete(req.params.id);
+
+    if (!product) {
+      return res.status(404).json({
+        success: false,
+        message: 'Product not found'
+      });
+    }
+
+    // Log action - with error handling to prevent crashes
+    try {
+      await SystemLog.create({
+        action: 'product_deleted',
+        actor: req.user?.email || 'system',
+        actorType: 'admin',
+        details: { productId: req.params.id },
+        module: 'product'
+      });
+    } catch (logError) {
+      console.error('Failed to create product delete log:', logError.message);
+      // Continue without crashing - product was deleted successfully
+    }
+
+    res.status(200).json({
+      success: true,
+      message: 'Product deleted successfully'
+    });
+  } catch (error) {
+    console.error('Error deleting product:', error);
+    res.status(500).json({
+      success: false,
+      message: 'Failed to delete product'
+    });
+  }
+};
+
+// Check if user can review a product (must have purchased it)
+export const canUserReview = async (req, res) => {
+  try {
+    // Support both req.params.id and req.body.productId
+    const productId = req.params.id || req.body.productId;
+    
+    // CRITICAL: Ensure user is authenticated
+    if (!req.user || !req.user._id) {
+      return res.status(401).json({ 
+        success: false,
+        message: 'Authentication required. Please log in.' 
+      });
+    }
+    
+    const userId = req.user._id;
+
+    if (!productId) {
+      return res.status(400).json({ 
+        success: false,
+        message: 'Product ID is required' 
+      });
+    }
+
+    // Check if user already reviewed this product
+    const product = await Product.findById(productId);
+    if (!product) {
+      return res.status(404).json({ 
+        success: false,
+        message: 'Product not found' 
+      });
+    }
+
+    // Check if user already reviewed
+    const alreadyReviewed = product.reviewDetails?.find(
+      r => r.user?.toString() === userId.toString()
+    );
+    if (alreadyReviewed) {
+      return res.status(400).json({ 
+        success: false,
+        message: 'You have already reviewed this product',
+        canReview: false
+      });
+    }
+
+    // VERIFY PURCHASE: Check if user actually bought this product
+    const hasBought = await Order.findOne({
+      user: userId,
+      isPaid: true,
+      $or: [
+        { 'orderItems.product': productId },
+        { 'orderItems': { $elemMatch: { productId: productId } } }
+      ]
+    });
+
+    if (!hasBought) {
+      return res.status(400).json({ 
+        success: false,
+        message: 'You must purchase this product to leave a review',
+        canReview: false,
+        verifiedBuyer: false
+      });
+    }
+
+    res.status(200).json({
+      success: true,
+      canReview: true,
+      verifiedBuyer: true,
+      message: 'You can review this product'
+    });
+  } catch (error) {
+    console.error('Error checking review eligibility:', error);
+    res.status(500).json({ 
+      success: false,
+      message: 'Failed to check review eligibility' 
+    });
+  }
+};
+
+// Add a review to a product
+export const addReview = async (req, res) => {
+  try {
+    // Debug logging to trace the productId
+    console.log("🔥 Review Req Params:", req.params, "Body:", req.body);
+    
+    const { rating, comment } = req.body;
+    // Support both req.params.id and req.body.productId for flexibility
+    const productId = req.params.id || req.body.productId;
+    
+    if (!productId) {
+      return res.status(400).json({ 
+        success: false,
+        message: 'Product ID is required' 
+      });
+    }
+    
+    // CRITICAL: Ensure user is authenticated
+    if (!req.user || !req.user._id) {
+      return res.status(401).json({ 
+        success: false,
+        message: 'Authentication required. Please log in.' 
+      });
+    }
+    
+    const userId = req.user._id;
+    // CRITICAL: Ensure we get a proper name for the review
+    const userName = req.user.name || req.user.email?.split('@')[0] || 'Customer';
+
+    // Validate input
+    if (!rating || rating < 1 || rating > 5) {
+      return res.status(400).json({ 
+        success: false,
+        message: 'Rating must be between 1 and 5 stars' 
+      });
+    }
+
+    const product = await Product.findById(productId);
+    if (!product) {
+      return res.status(404).json({ 
+        success: false,
+        message: "Can't find product info in DB." 
+      });
+    }
+
+    // Check if user already reviewed
+    const alreadyReviewed = product.reviewDetails?.find(
+      r => r.user?.toString() === userId.toString()
+    );
+    if (alreadyReviewed) {
+      return res.status(400).json({ 
+        success: false,
+        message: 'You have already reviewed this product' 
+      });
+    }
+
+    // VERIFY PURCHASE: Check if user actually bought this product
+    // Note: We intentionally relax the isPaid/isDelivered checks to allow sandbox test orders
+    const hasBought = await Order.findOne({
+      user: userId,
+      'items.product': productId
+    });
+
+    if (!hasBought) {
+      console.error(`🚨 REVIEW REJECTED: Could not find order for User: ${userId} | Product: ${productId}`);
+      return res.status(400).json({ 
+        success: false,
+        message: 'You must purchase this product to leave a review. Only verified buyers can review products.' 
+      });
+    }
+
+    // Create review object
+    const review = {
+      user: userId,
+      userName: userName,
+      rating: Number(rating),
+      comment: comment || '',
+      isVerifiedPurchase: true, // Mark as verified since they purchased
+      createdAt: new Date()
+    };
+
+    // Initialize reviewDetails array if it doesn't exist
+    if (!product.reviewDetails) {
+      product.reviewDetails = [];
+    }
+
+    // Add review to product
+    product.reviewDetails.push(review);
+
+    // Calculate new average rating
+    const totalRating = product.reviewDetails.reduce((sum, r) => sum + r.rating, 0);
+    product.rating = totalRating / product.reviewDetails.length;
+    product.reviews = product.reviewDetails.length;
+
+    await product.save();
+
+    res.status(201).json({
+      success: true,
+      message: 'Review added successfully',
+      review: review
+    });
+  } catch (error) {
+    console.error('Error adding review:', error);
+    res.status(500).json({ 
+      success: false,
+      message: 'Failed to add review' 
+    });
+  }
+};
+
+// Migration: Fix category typo (snekers -> sneakers/SNEKERS)
+export const migrateCategoryTypo = async (req, res) => {
+  try {
+    // Find products with potential typos in category
+    const typoVariants = ['snekers', 'SNEKERS', 'Snekers', 'sneaker', 'SNEAKER'];
+    
+    // First, find and report how many products have the typo
+    const productsWithTypo = await Product.find({
+      category: { $in: typoVariants }
+    });
+    
+    console.log(`Found ${productsWithTypo.length} products with category typo`);
+    
+    if (productsWithTypo.length === 0) {
+      return res.status(200).json({
+        success: true,
+        message: 'No products with category typo found',
+        migratedCount: 0
+      });
+    }
+    
+    // Update all products with typo to the correct category
+    const result = await Product.updateMany(
+      { category: { $in: typoVariants } },
+      { $set: { category: 'Sneakers' } }
+    );
+    
+    // Log the migration
+    try {
+      await SystemLog.create({
+        action: 'category_typo_migration',
+        actor: req.user?.email || 'system',
+        actorType: 'admin',
+        details: { 
+          migratedCount: result.modifiedCount,
+          oldCategories: typoVariants,
+          newCategory: 'Sneakers'
+        },
+        module: 'product'
+      });
+    } catch (logError) {
+      console.error('Failed to create migration log:', logError.message);
+    }
+    
+    res.status(200).json({
+      success: true,
+      message: `Successfully migrated ${result.modifiedCount} products from category typo to Sneakers`,
+      migratedCount: result.modifiedCount
+    });
+  } catch (error) {
+    console.error('Error migrating category typo:', error);
+    res.status(500).json({
+      success: false,
+      message: 'Failed to migrate category typo'
+    });
+  }
+};
+
+// Get Best Selling Products - aggregates sales data from orders
+export const getBestSellers = async (req, res) => {
+  try {
+    const { limit = 8 } = req.query;
+    
+    // Aggregate order items to find best selling products
+    const bestSellers = await Order.aggregate([
+      // Only consider paid orders
+      { $match: { isPaid: true } },
+      // Unwind order items to get individual products
+      { $unwind: '$orderItems' },
+      // Group by product and sum quantities
+      { $group: {
+        _id: '$orderItems.productId',
+        totalSold: { $sum: '$orderItems.quantity' }
+      }},
+      // Sort by total sold (descending)
+      { $sort: { totalSold: -1 } },
+      // Limit to requested number
+      { $limit: parseInt(limit) },
+      // Lookup product details
+      { $lookup: {
+        from: 'products',
+        localField: '_id',
+        foreignField: '_id',
+        as: 'product'
+      }},
+      // Unwind product array
+      { $unwind: '$product' },
+      // Project final shape
+      { $project: {
+        _id: '$product._id',
+        name: '$product.name',
+        price: '$product.price',
+        image: '$product.images',
+        category: '$product.category',
+        totalSold: 1
+      }}
+    ]);
+
+    // Transform products with active pricing
+    const transformedProducts = bestSellers.map(p => {
+      const productObj = p.image && p.image[0] ? p.image[0] : p.image;
+      return {
+        ...p,
+        activePrice: p.price,
+        originalPrice: p.price,
+        image: Array.isArray(productObj) ? productObj[0] : productObj
+      };
+    });
+
+    res.status(200).json({
+      success: true,
+      products: transformedProducts
+    });
+  } catch (error) {
+    console.error('Error fetching best sellers:', error);
+    res.status(500).json({
+      success: false,
+      message: 'Failed to fetch best sellers'
+    });
+  }
+};
+
+// Get processing uploads progress
+export const getProcessingUploads = async (req, res) => {
+  try {
+    const jobs = await imageQueue.getJobs(['active', 'waiting', 'delayed', 'paused', 'failed']);
+    const processingProducts = [];
+    
+    for (const job of jobs) {
+      if (job.data && job.data.productId) {
+        let productName = 'Unknown Product';
+        try {
+          const product = await Product.findById(job.data.productId).select('name');
+          if (product) productName = product.name;
+        } catch (e) {
+          // Ignore DB fetch errors
+        }
+        
+        processingProducts.push({
+          jobId: job.id,
+          productId: job.data.productId,
+          productName,
+          totalImages: job.data.imagePaths ? job.data.imagePaths.length : 0,
+          progress: job.progress || 0,
+          status: await job.getState(),
+          failedReason: job.failedReason,
+          createdAt: new Date(job.timestamp)
+        });
+      }
+    }
+    
+    res.status(200).json({
+      success: true,
+      processingCount: processingProducts.length,
+      jobs: processingProducts
+    });
+  } catch (error) {
+    console.error('Error fetching processing progress:', error);
+    res.status(500).json({
+      success: false,
+      message: 'Failed to fetch processing progress'
+    });
+  }
+};
+
+export const generateDescription = async (req, res) => {
+  try {
+    const { productName } = req.body;
+    if (!productName || !productName.trim()) {
+      return res.status(400).json({ success: false, message: "Product name is required." });
+    }
+
+    const groq = getGroqClient();
+    const response = await groq.chat.completions.create({
+      model: "llama-3.3-70b-versatile",
+      messages: [
+        {
+          role: "system",
+          content: "You are an expert e-commerce copywriter for Seekon Apparel. Generate a modern, persuasive, and concise single-paragraph product description (maximum 3-4 high-impact sentences) for the provided product name. YOU MUST OUTPUT ONLY THE DESCRIPTION TEXT. Do not use markdown, do not use asterisks, and DO NOT include any introductory or concluding phrases like 'Here is the description' or 'Sure!'. Start immediately with the first word of the description."
+        },
+        {
+          role: "user",
+          content: productName
+        }
+      ]
+    });
+
+    const description = response.choices[0]?.message?.content || "";
+    return res.status(200).json({ success: true, description });
+  } catch (error) {
+    console.error("Error generating product description:", error);
+    return res.status(500).json({ success: false, message: "Failed to generate product description." });
+  }
+};
+
+
+
