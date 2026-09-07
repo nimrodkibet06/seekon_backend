@@ -7,13 +7,13 @@
 // ============================================================
 
 import makeWASocket, {
-  useMultiFileAuthState,
   DisconnectReason,
   downloadMediaMessage,
   fetchLatestBaileysVersion,
   makeCacheableSignalKeyStore,
   downloadContentFromMessage,
 } from '@whiskeysockets/baileys';
+import { useMongoDBAuthState, clearAuthData } from './mongoAuthState.js';
 import pino from 'pino';
 import { Boom } from '@hapi/boom';
 import fs from 'fs';
@@ -1448,14 +1448,8 @@ const handleAdminPanelUpsert = async (messages) => {
 export const initWhatsAppClient = async () => {
   console.log('📦 [WA]: Initializing Baileys WASocket (Chromium-free)...');
 
-  // Ensure auth directory exists on disk
-  if (!fs.existsSync(AUTH_DIR)) {
-    fs.mkdirSync(AUTH_DIR, { recursive: true });
-    console.log(`📂 [WA]: Created auth directory at ${AUTH_DIR}`);
-  }
-
-  // STEP 2.1 — Multi-file auth state (QR scan credentials persisted to disk)
-  const { state, saveCreds } = await useMultiFileAuthState(AUTH_DIR);
+  // STEP 2.1 — MongoDB auth state (QR scan credentials persisted to DB)
+  const { state, saveCreds } = await useMongoDBAuthState();
 
   // Fetch latest WhatsApp Web version supported by Baileys
   const { version, isLatest } = await fetchLatestBaileysVersion();
@@ -1539,11 +1533,10 @@ export const initWhatsAppClient = async () => {
 
       if (isLoggedOut) {
         // Explicit logout — wipe auth so next init produces a fresh QR
-        console.log('🔐 [WA]: Explicit logout detected. Clearing auth credentials.');
-        try {
-          fs.rmSync(AUTH_DIR, { recursive: true, force: true });
-        } catch (e) {
-          console.warn('⚠️ [WA]: Could not clear auth directory:', e.message);
+        if (statusCode === DisconnectReason.loggedOut) {
+          console.error('❌ [WA]: Device logged out. Clearing MongoDB auth data.');
+          await clearAuthData();
+          isShuttingDown = true;
         }
       } else if (!isShuttingDown) {
         // Any other disconnect (network drop, server restart, etc.) → autonomous reconnect
@@ -1773,10 +1766,7 @@ export const logoutWhatsAppClient = async () => {
   isConnected = false;
 
   try {
-    if (fs.existsSync(AUTH_DIR)) {
-      fs.rmSync(AUTH_DIR, { recursive: true, force: true });
-      console.log(`🗑️ [WA]: Auth directory cleared: ${AUTH_DIR}`);
-    }
+    await clearAuthData();
   } catch (e) {
     console.error('❌ [WA]: Failed to clear auth directory:', e.message);
   }
