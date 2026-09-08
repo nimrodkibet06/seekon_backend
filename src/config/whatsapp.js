@@ -1076,6 +1076,271 @@ const finalizeAndPublishProduct = async (remoteJid, senderId, session) => {
 };
 
 // ─────────────────────────────────────────────────────────────────────────────
+// GHOST MODE — Silent product extractor for buyer showcase group.
+//
+// Intercepts images (with captions) posted by admins in BUYER_GROUP_JID.
+// Silently extracts product details via Groq, streams the image to disk,
+// creates a Product document, and enqueues the BullMQ image-processing job.
+//
+// STRICT: NEVER calls sock.sendMessage on BUYER_GROUP_JID.
+//         All notifications (success & failure) go to ADMIN_GROUP_JID ONLY.
+// ─────────────────────────────────────────────────────────────────────────────
+const rawBuyerGroupJid = process.env.BUYER_GROUP_JID || '';
+const buyerGroupJid    = rawBuyerGroupJid.replace(/['"]/g, '').trim();
+
+const ghostNotify = async (message) => {
+  if (!adminGroupJid) return;
+  try {
+    await sendSafeMessage(adminGroupJid, message);
+  } catch (err) {
+    console.error('❌ [GHOST]: Could not notify admin group:', err.message);
+  }
+};
+
+const streamImageToDisk = async (imageMessage, destPath) => {
+  const stream = await downloadContentFromMessage(imageMessage, 'image');
+  await new Promise((resolve, reject) => {
+    const fsStream = fs.createWriteStream(destPath);
+    fsStream.on('finish', resolve);
+    fsStream.on('error', reject);
+    stream.on('error', reject);
+    stream.on('data', (chunk) => {
+      if (!fsStream.write(chunk)) {
+        stream.pause?.();
+        fsStream.once('drain', () => stream.resume?.());
+      }
+    });
+    stream.on('end', () => fsStream.end());
+  });
+};
+
+const extractProductFromCaption = async (caption) => {
+  const groq = getGroqClient();
+  const systemPrompt = `You are a product data extractor for a sneaker/apparel online store called Seekon.
+
+Given a WhatsApp caption from an admin posting a product in the buyer showcase group, extract product details and return ONLY valid JSON matching this exact schema:
+{
+  "isProduct": true,
+  "name": "full product name",
+  "brand": "brand name",
+  "category": "Sneakers" | "Apparel" | "Accessories",
+  "subCategory": "optional sub-category string or empty string",
+  "price": <number>,
+  "sizes": ["array", "of", "size", "strings"],
+  "colors": ["array", "of", "color", "strings"],
+  "description": "4-5 sentence compelling product description. Strong opener, standout features, fit/feel, why it belongs in buyer collection. No generic openers like Introducing or Meet the."
+}
+
+If the message is NOT a product (e.g. greetings, announcements), return:
+{ "isProduct": false }
+
+RULES:
+- Price: "5k"=5000, "5,000"=5000, "5000 bob"=5000, "KES 5000"=5000, "5000/="=5000.
+- Sizes: "35 to 45" or "35-45" → ["35","36","37","38","39","40","41","42","43","44","45"]. "S M L" → ["S","M","L"].
+- If price missing, set price: 0 but keep isProduct: true.
+- Category must be exactly: Sneakers, Apparel, or Accessories.
+- Output raw JSON only. No markdown, no code fences.`;
+
+  const response = await groq.chat.completions.create({
+    model: 'openai/gpt-oss-120b',
+    messages: [
+      { role: 'system', content: systemPrompt },
+      { role: 'user', content: `Extract product from this caption: ${caption}` }
+    ],
+    response_format: { type: 'json_object' }
+  });
+
+  const raw = response?.choices?.[0]?.message?.content?.trim();
+  if (!raw) return null;
+  return JSON.parse(raw);
+};
+
+const handleBuyerGroupGhostMode = async (messages) => {
+  if (!buyerGroupJid) return;
+
+  for (const msg of messages) {
+    try {
+      const remoteJid = msg.key?.remoteJid || '';
+      if (remoteJid !== buyerGroupJid) continue;
+      if (msg.key?.fromMe) continue;
+      if (msg.key?.id && sentMessageIds.has(msg.key.id)) continue;
+
+      const isImage = !!(msg.message?.imageMessage);
+      const caption = (
+        msg.message?.imageMessage?.caption ||
+        msg.message?.extendedTextMessage?.text ||
+        msg.message?.conversation ||
+        ''
+      ).trim();
+
+      const senderId = msg.key?.participant || msg.key?.remoteJid || '';
+      console.log(`👻 [GHOST]: Message from ${senderId} in buyer group. isImage=${isImage}, captionLen=${caption.length}`);
+
+      // Image with no caption
+      if (isImage && !caption) {
+        await ghostNotify(
+          `⚠️ *[Ghost Ingest Failed]*\n` +
+          `An image was posted in the showcase group without a caption.\n` +
+          `I couldn't extract product details.\n` +
+          `_Sender: ${senderId}_`
+        );
+        continue;
+      }
+
+      // Text-only message — skip silently (we need image+caption)
+      if (!isImage) continue;
+
+      // AI extraction
+      let parsed;
+      try {
+        parsed = await extractProductFromCaption(caption);
+      } catch (groqErr) {
+        console.error('❌ [GHOST]: Groq extraction failed:', groqErr.message);
+        await ghostNotify(
+          `🚨 *[System Error]*\n` +
+          `Failed to run AI extraction on showcase image.\n` +
+          `Error: ${groqErr.message}\n` +
+          `_Caption snippet: "${caption.slice(0, 80)}"_`
+        );
+        continue;
+      }
+
+      // AI rejected
+      if (!parsed || parsed.isProduct === false) {
+        await ghostNotify(
+          `⚠️ *[Ghost Ingest Ignored]*\n` +
+          `A message was posted in the showcase group, but the AI determined it wasn't a product.\n` +
+          `_Caption snippet: "${caption.slice(0, 100)}"_`
+        );
+        continue;
+      }
+
+      // Missing vital fields
+      const missingFields = [];
+      if (!parsed.name || String(parsed.name).trim().length < 2) missingFields.push('Name');
+      if (!parsed.price || parsed.price <= 0) missingFields.push('Price');
+
+      if (missingFields.length > 0) {
+        await ghostNotify(
+          `❌ *[Ghost Ingest Error]*\n` +
+          `Missing required details in the showcase group post.\n` +
+          `*Missing:* ${missingFields.join(', ')}\n` +
+          `Please ensure the Name and Price are clear in the caption.\n` +
+          `_Caption snippet: "${caption.slice(0, 100)}"_`
+        );
+        continue;
+      }
+
+      // Normalize
+      const normalizedPrice    = cleanPrice(parsed.price) || parsed.price;
+      const normalizedSizes    = expandSizeRange(parsed.sizes);
+      const normalizedColors   = Array.isArray(parsed.colors)
+        ? parsed.colors.map(c => String(c).trim()).filter(Boolean)
+        : [];
+      const validCategories    = ['Sneakers', 'Apparel', 'Accessories'];
+      const normalizedCategory = validCategories.includes(parsed.category) ? parsed.category : 'Sneakers';
+
+      // Stream image to disk
+      const uploadDir = process.env.GHOST_UPLOAD_DIR || './uploads/queue';
+      try {
+        if (!fs.existsSync(uploadDir)) fs.mkdirSync(uploadDir, { recursive: true });
+      } catch (_) {}
+
+      const safeName    = String(parsed.name).replace(/[^a-z0-9]/gi, '_').slice(0, 40);
+      const tempFileName = `ghost_${safeName}_${Date.now()}.jpg`;
+      const tempFilePath = path.join(uploadDir, tempFileName);
+
+      try {
+        await streamImageToDisk(msg.message.imageMessage, tempFilePath);
+        console.log(`💾 [GHOST]: Image streamed to ${tempFilePath}`);
+      } catch (streamErr) {
+        console.error('❌ [GHOST]: Image stream failed:', streamErr.message);
+        await ghostNotify(
+          `🚨 *[System Error]*\n` +
+          `Failed to save the showcase image to disk.\n` +
+          `Error: ${streamErr.message}\n` +
+          `_Product: ${parsed.name}_`
+        );
+        continue;
+      }
+
+      // Create MongoDB product
+      let newProduct;
+      try {
+        newProduct = await Product.create({
+          name:        String(parsed.name).trim().slice(0, 120),
+          brand:       (parsed.brand || 'SEEKON').trim().slice(0, 60),
+          category:    normalizedCategory,
+          subCategory: (parsed.subCategory || '').trim().slice(0, 60),
+          price:       normalizedPrice,
+          sizes:       normalizedSizes,
+          colors:      normalizedColors,
+          description: (parsed.description || '').trim().slice(0, 1200),
+          stock:       200,
+          status:      'processing',
+          image:       '',
+          images:      [],
+          inStock:     true
+        });
+        console.log(`📦 [GHOST]: Product created in MongoDB: ${newProduct._id}`);
+      } catch (dbErr) {
+        console.error('❌ [GHOST]: MongoDB create failed:', dbErr.message);
+        try { if (fs.existsSync(tempFilePath)) fs.unlinkSync(tempFilePath); } catch (_) {}
+        await ghostNotify(
+          `🚨 *[System Error]*\n` +
+          `Failed to save product to the database.\n` +
+          `Error: ${dbErr.message}\n` +
+          `_Product: ${parsed.name}_`
+        );
+        continue;
+      }
+
+      // Dispatch BullMQ job
+      try {
+        await imageQueue.add('processImages', {
+          productId:              newProduct._id.toString(),
+          imagePaths:             [tempFilePath],
+          runAIBackgroundRemoval: true
+        });
+        console.log(`🚀 [GHOST]: BullMQ job dispatched for product ${newProduct._id}`);
+      } catch (queueErr) {
+        console.error('⚠️ [GHOST]: BullMQ enqueue failed (product saved):', queueErr.message);
+        await ghostNotify(
+          `⚠️ *[Ghost Ingest Warning]*\n` +
+          `Product was saved to the database but the image processing job failed to queue.\n` +
+          `*Product ID:* ${newProduct._id}\n` +
+          `Please manually re-trigger background removal.\n` +
+          `Error: ${queueErr.message}`
+        );
+        continue;
+      }
+
+      // Success
+      await ghostNotify(
+        `✅ *[Ghost Ingest Successful]*\n` +
+        `A new product was captured from the showcase group and queued for background removal!\n\n` +
+        `*Product:* ${parsed.name}\n` +
+        `*Brand:* ${parsed.brand || 'SEEKON'}\n` +
+        `*Category:* ${normalizedCategory}\n` +
+        `*Price:* KES ${Number(normalizedPrice).toLocaleString()}\n` +
+        `*Sizes Captured:* ${normalizedSizes.length}\n` +
+        `*Colors:* ${normalizedColors.join(', ') || 'N/A'}\n` +
+        `*Stock Set:* 200\n` +
+        `*Mongo ID:* ${newProduct._id}`
+      );
+
+    } catch (err) {
+      console.error('🔥 [GHOST-ERROR]:', err.message || err);
+      try {
+        await ghostNotify(
+          `🚨 *[System Error]*\nAn unexpected error occurred in Ghost Mode.\nError: ${err.message}`
+        );
+      } catch (_) {}
+    }
+  }
+};
+
+// ─────────────────────────────────────────────────────────────────────────────
 // Conversational WhatsApp Admin Panel — accepts product uploads from admins.
 // ─────────────────────────────────────────────────────────────────────────────
 const handleAdminPanelUpsert = async (messages) => {
@@ -1578,6 +1843,13 @@ export const initWhatsAppClient = async () => {
   sock.ev.on('messages.upsert', async ({ messages: msgs, type }) => {
     if (type !== 'notify') return;
     await handleAdminPanelUpsert(msgs);
+  });
+
+  // ── Ghost Mode — silent product extractor from buyer showcase group ───────
+  // Strictly read-only for BUYER_GROUP_JID. All notifications → ADMIN_GROUP_JID.
+  sock.ev.on('messages.upsert', async ({ messages: msgs, type }) => {
+    if (type !== 'notify') return;
+    await handleBuyerGroupGhostMode(msgs);
   });
 
   console.log('✅ [WA]: Baileys socket initialized. All event listeners active.');
