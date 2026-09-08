@@ -1856,25 +1856,6 @@ export const initWhatsAppClient = async () => {
       isConnected = true;
       console.log('🚀 [WA]: Socket OPEN — Baileys authenticated and live!');
 
-      // ── Group Finder (Dumps groups to console once connected) ──
-      try {
-        console.log('🔍 [WA]: Scanning for groups to find the buyer showcase JID...');
-        const groups = await sock.groupFetchAllParticipating();
-        const keywords = ['seekon', 'buyer', 'showcase', 'admin', 'command', 'seller', 'store'];
-        const allJids = Object.keys(groups);
-        
-        console.log(`\n================== WHATSAPP GROUPS (${allJids.length}) ==================`);
-        for (const jid of allJids) {
-          const name = groups[jid].subject || '(no name)';
-          const isKeyword = keywords.some(k => name.toLowerCase().includes(k));
-          const flag = isKeyword ? '  ⭐ <-- POSSIBLE MATCH' : '';
-          console.log(`  Name: "${name}"  -->  JID: ${jid}${flag}`);
-        }
-        console.log('==========================================================\n');
-      } catch (err) {
-        console.error('⚠️ [WA]: Failed to fetch groups:', err.message);
-      }
-
       // STEP 4 — Recovery: re-fire any tasks that were 'pending' when the
       // process was last killed. Runs async so it never blocks the open event.
       resumeDroppedTasks().catch(e =>
