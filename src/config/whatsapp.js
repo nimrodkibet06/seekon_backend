@@ -1139,7 +1139,8 @@ Given a WhatsApp message from an admin posting a product in the buyer showcase g
   "price": <number>,
   "sizes": ["array", "of", "size", "strings"],
   "colors": ["array", "of", "color", "strings"],
-  "description": "4-5 sentence compelling product description. Strong opener, standout features, fit/feel, why it belongs in buyer collection. No generic openers like Introducing or Meet the."
+  "description": "4-5 sentence compelling product description. Strong opener, standout features, fit/feel, why it belongs in buyer collection. No generic openers like Introducing or Meet the.",
+  "runBgRemoval": false
 }
 
 If the message is NOT a product (e.g. greetings, buyer questions, random chatter), return:
@@ -1150,6 +1151,7 @@ RULES:
 - Sizes: "35 to 45" or "35-45" → ["35","36","37","38","39","40","41","42","43","44","45"]. "S M L" → ["S","M","L"].
 - If price missing, set price: 0 but keep isProduct: true.
 - Category must be exactly: Sneakers, Apparel, or Accessories.
+- runBgRemoval: ONLY set to true if the admin explicitly says "remove background" or "clear background". Otherwise always output false.
 - Output raw JSON only. No markdown, no code fences.`;
 
   const response = await groq.chat.completions.create({
@@ -1310,8 +1312,8 @@ const evaluateGhostSession = async (senderId) => {
     try {
       await imageQueue.add('processImages', {
         productId:              newProduct._id.toString(),
-        imagePaths:             session.images,   // full batch
-        runAIBackgroundRemoval: true              // enforced for all
+        imagePaths:             session.images,
+        runAIBackgroundRemoval: parsed.runBgRemoval === true
       });
       console.log(`🚀 [GHOST]: BullMQ job dispatched for ${newProduct._id} (${session.images.length} images)`);
     } catch (queueErr) {
@@ -1558,7 +1560,7 @@ const handleAdminPanelUpsert = async (messages) => {
             brand: 'SEEKON',
             category: 'Sneakers',
             description: '',
-            runBgRemoval: true,
+            runBgRemoval: false,
             imagePaths: [],
             allDetailsCollected: false
           },
