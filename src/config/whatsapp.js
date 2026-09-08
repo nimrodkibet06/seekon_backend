@@ -1400,13 +1400,17 @@ const handleBuyerGroupGhostMode = async (messages) => {
         }
       }
 
-      // Reset the 60-second rolling timer
+      // If we already have a caption, we only wait a short 4-second debounce 
+      // just in case they sent an album of multiple images at once.
+      // If we don't have a caption yet, we give them a full 60 seconds to type one.
+      const waitTime = session.texts.length > 0 ? 4000 : 60000;
+
       if (session.timer) clearTimeout(session.timer);
       session.timer = setTimeout(() => {
         evaluateGhostSession(senderId).catch(err => {
           console.error('🔥 [GHOST]: evaluateGhostSession threw:', err.message);
         });
-      }, 60000);
+      }, waitTime);
 
     } catch (err) {
       console.error('🔥 [GHOST-ERROR]:', err.message || err);
