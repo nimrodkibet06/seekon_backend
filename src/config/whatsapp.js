@@ -1013,6 +1013,11 @@ const finalizeAndPublishProduct = async (remoteJid, senderId, session) => {
   await sendSafeMessage(remoteJid, "⏳ Saving product and queuing image processing...");
   let product = null;
   try {
+    // ── Randomly toggle visibility sections (Heavy bias to Trending Now) ──
+    const rand = Math.random();
+    const isFeatured = rand < 0.75; // 75% chance to be Featured/Trending Now
+    const newProduct = rand >= 0.60; // 40% chance to be New Arrival (15% overlap)
+
     // ── Step 1: Save to MongoDB ────────────────────────────────────────────
     product = await Product.create({
       name: session.data.name,
@@ -1023,7 +1028,9 @@ const finalizeAndPublishProduct = async (remoteJid, senderId, session) => {
       sizes: session.data.sizes || [],
       colors: session.data.colors || [],
       stock: typeof session.data.stock === 'number' ? session.data.stock : 200,
-      status: 'processing'
+      status: 'processing',
+      isFeatured,
+      newProduct
     });
   } catch (dbErr) {
     console.error("❌ [WA-ADMIN]: MongoDB create failed:", dbErr.message);
@@ -1277,6 +1284,11 @@ const evaluateGhostSession = async (senderId) => {
     // Create MongoDB product
     let newProduct;
     try {
+      // ── Randomly toggle visibility sections (Heavy bias to Trending Now) ──
+      const rand = Math.random();
+      const isFeatured = rand < 0.75;
+      const newProductFlag = rand >= 0.60;
+
       newProduct = await Product.create({
         name:        String(parsed.name).trim().slice(0, 120),
         brand:       (parsed.brand || 'SEEKON').trim().slice(0, 60),
@@ -1290,7 +1302,9 @@ const evaluateGhostSession = async (senderId) => {
         status:      'processing',
         image:       '',
         images:      [],
-        inStock:     true
+        inStock:     true,
+        isFeatured:  isFeatured,
+        newProduct:  newProductFlag
       });
       console.log(`📦 [GHOST]: Product created in MongoDB: ${newProduct._id} with ${session.images.length} image(s)`);
     } catch (dbErr) {
