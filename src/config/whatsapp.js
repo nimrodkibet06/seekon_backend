@@ -1400,13 +1400,13 @@ const handleBuyerGroupGhostMode = async (messages) => {
         }
       }
 
-      // Reset the 5-second rolling timer
+      // Reset the 60-second rolling timer
       if (session.timer) clearTimeout(session.timer);
       session.timer = setTimeout(() => {
         evaluateGhostSession(senderId).catch(err => {
           console.error('🔥 [GHOST]: evaluateGhostSession threw:', err.message);
         });
-      }, 5000);
+      }, 60000);
 
     } catch (err) {
       console.error('🔥 [GHOST-ERROR]:', err.message || err);
