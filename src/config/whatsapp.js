@@ -41,6 +41,7 @@ import { normalizePhone } from '../utils/phoneFormatter.js';
 import User from '../models/User.js';
 import Admin from '../models/Admin.js';
 import { getGroqClient } from '../utils/groqProvider.js';
+import { processHeroConversationWithAI } from './heroAi.js';
 
 // ─────────────────────────────────────────────────────────────────────────────
 // STEP 5 — Isolated Cloudinary instance for status media (Account B)
@@ -115,6 +116,7 @@ const MAX_CACHE_SIZE = 500;
 
 const activeSessions = new Map();
 const adminUploadSessions = new Map();
+const adminHeroSessions = new Map();
 const sentMessageIds = new Set();
 const rawGroupJid = process.env.ADMIN_GROUP_JID || process.env.ADMIN_WHATSAPP_GROUP_ID || '';
 const adminGroupJid = rawGroupJid.replace(/['"]/g, '').trim();
@@ -1449,7 +1451,45 @@ const handleBuyerGroupGhostMode = async (messages) => {
 // Conversational WhatsApp Admin Panel — accepts product uploads from admins.
 // ─────────────────────────────────────────────────────────────────────────────
 // ─────────────────────────────────────────────────────────────────────────────
-// handleHeroCommand - intercepts /hero commands to change homepage media
+// applyHomepageUpdate - reused by strict commands and AI conversational flow
+// ─────────────────────────────────────────────────────────────────────────────
+const applyHomepageUpdate = async (remoteJid, newMediaUrl, newPublicId, heroHeading, heroSubtitle) => {
+  try {
+    const currentConfig = await Setting.findOne({ key: 'homePage' });
+    
+    // Only archive if we are changing the media (newMediaUrl provided) and old media exists
+    if (newMediaUrl && currentConfig?.value?.heroVideoUrl && currentConfig?.value?.cloudinaryPublicId) {
+      await HeroHistory.create({
+        heroVideoUrl: currentConfig.value.heroVideoUrl,
+        cloudinaryPublicId: currentConfig.value.cloudinaryPublicId,
+        resourceType: currentConfig.value.heroVideoUrl?.includes('/video/') || currentConfig.value.heroVideoUrl?.endsWith('mp4') ? 'video' : 'image',
+        heroHeading: currentConfig.value.heroHeading,
+        heroSubtitle: currentConfig.value.heroSubtitle,
+        expiresAt: new Date(Date.now() + 10 * 24 * 60 * 60 * 1000) // 10 days
+      });
+    }
+
+    const updates = {};
+    if (newMediaUrl) updates["value.heroVideoUrl"] = newMediaUrl;
+    if (newPublicId) updates["value.cloudinaryPublicId"] = newPublicId;
+    if (heroHeading !== null && heroHeading !== undefined) updates["value.heroHeading"] = heroHeading;
+    if (heroSubtitle !== null && heroSubtitle !== undefined) updates["value.heroSubtitle"] = heroSubtitle;
+
+    await Setting.findOneAndUpdate(
+      { key: 'homePage' },
+      { $set: updates },
+      { upsert: true }
+    );
+
+    await sendSafeMessage(remoteJid, `🎉 *Homepage Hero successfully updated!*\n\n*Heading:* ${heroHeading || currentConfig?.value?.heroHeading}\n*Subtitle:* ${heroSubtitle || currentConfig?.value?.heroSubtitle}\n\n_Use /hero history to view previous media._`);
+  } catch (e) {
+    console.error("Hero upload error:", e);
+    await sendSafeMessage(remoteJid, "❌ Failed to update hero: " + e.message);
+  }
+};
+
+// ─────────────────────────────────────────────────────────────────────────────
+// handleHeroCommand - intercepts /hero strict commands (history, rollback)
 // ─────────────────────────────────────────────────────────────────────────────
 const handleHeroCommand = async (msg, text, remoteJid, senderId) => {
   const parts = text.split(/\s+/);
@@ -1489,136 +1529,20 @@ const handleHeroCommand = async (msg, text, remoteJid, senderId) => {
         return true;
       }
       
-      // Save current to history before rollback
-      const currentConfig = await Setting.findOne({ key: 'homePage' });
-      if (currentConfig?.value) {
-        await HeroHistory.create({
-          heroVideoUrl: currentConfig.value.heroVideoUrl,
-          cloudinaryPublicId: currentConfig.value.cloudinaryPublicId || 'unknown',
-          resourceType: currentConfig.value.heroVideoUrl?.includes('/video/') || currentConfig.value.heroVideoUrl?.endsWith('mp4') ? 'video' : 'image',
-          heroHeading: currentConfig.value.heroHeading,
-          heroSubtitle: currentConfig.value.heroSubtitle,
-          expiresAt: new Date(Date.now() + 10 * 24 * 60 * 60 * 1000)
-        });
-      }
-
-      // Apply rollback
-      await Setting.findOneAndUpdate(
-        { key: 'homePage' },
-        { 
-          $set: {
-            "value.heroVideoUrl": historyRecord.heroVideoUrl,
-            "value.cloudinaryPublicId": historyRecord.cloudinaryPublicId,
-            "value.heroHeading": historyRecord.heroHeading,
-            "value.heroSubtitle": historyRecord.heroSubtitle
-          } 
-        },
-        { upsert: true }
+      await applyHomepageUpdate(
+        remoteJid, 
+        historyRecord.heroVideoUrl, 
+        historyRecord.cloudinaryPublicId, 
+        historyRecord.heroHeading, 
+        historyRecord.heroSubtitle
       );
-      await sendSafeMessage(remoteJid, `✅ Homepage Hero rolled back successfully to:\n*${historyRecord.heroHeading}*`);
     } catch (e) {
       await sendSafeMessage(remoteJid, "❌ Error during rollback: " + e.message);
     }
     return true;
   }
 
-  // 3. Set new media
-  const igRegex = /(https:\/\/(?:www\.)?instagram\.com\/(?:p|reel)\/[a-zA-Z0-9_-]+)/i;
-  const igMatch = text.match(igRegex);
-  const igUrl = igMatch ? igMatch[1] : null;
-
-  const isImage = !!(msg.message?.imageMessage);
-  const isVideo = !!(msg.message?.videoMessage);
-  
-  if (!isImage && !isVideo && !igUrl) {
-    await sendSafeMessage(remoteJid, "⚠️ To change the homepage hero, attach a video/image OR include an Instagram link with the caption:\n*/hero Heading | Subtitle | https://instagram.com/...*");
-    return true;
-  }
-
-  // Extract heading and subtitle from caption. Strip the command and IG URL out.
-  let payload = text.replace(/^\/hero/i, '').trim();
-  if (igUrl) payload = payload.replace(igUrl, '').trim();
-  
-  const [headingStr, subtitleStr] = payload.split('|').map(s => s.trim());
-  const heroHeading = headingStr || "STEP INTO THE FUTURE";
-  const heroSubtitle = subtitleStr || "Discover the latest drops from Nike, Adidas, Jordan, and more.";
-
-  let newMediaUrl;
-  let newPublicId;
-
-  try {
-    if (igUrl) {
-      await sendSafeMessage(remoteJid, "⏳ Extracting video from Instagram link...");
-      const { stdout, stderr } = await execAsync(`yt-dlp -g "${igUrl}"`);
-      const directUrl = stdout.trim().split('\n')[0]; // Grab the first URL returned
-      
-      if (!directUrl || !directUrl.startsWith('http')) {
-        throw new Error("yt-dlp could not extract a valid media URL.");
-      }
-
-      await sendSafeMessage(remoteJid, "⏳ Uploading extracted video to Cloudinary...");
-      // For URLs, we use the global cloudinaryV2.uploader.upload directly, passing the custom Account B creds
-      const result = await cloudinaryV2.uploader.upload(directUrl, {
-        folder: 'seekon_hero',
-        resource_type: 'video',
-        api_key: STATUS_CLOUDINARY_CREDS.key,
-        api_secret: STATUS_CLOUDINARY_CREDS.secret,
-        cloud_name: STATUS_CLOUDINARY_CREDS.cloud
-      });
-      newMediaUrl = result.secure_url;
-      newPublicId = result.public_id;
-    } else {
-      await sendSafeMessage(remoteJid, "⏳ Downloading and uploading new homepage media to Cloudinary...");
-      const rawBuffer = await downloadMediaMessage(
-        msg,
-        'buffer',
-        {},
-        { logger, reuploadRequest: sock.updateMediaMessage }
-      );
-      
-      const mediaType = isVideo ? 'video' : 'image';
-      const result = await uploadToStatusCloudinary(rawBuffer, { 
-        folder: 'seekon_hero', 
-        resource_type: mediaType 
-      });
-
-      newMediaUrl = result.secure_url;
-      newPublicId = result.public_id;
-    }
-
-    // Save existing config to history
-    const currentConfig = await Setting.findOne({ key: 'homePage' });
-    if (currentConfig?.value?.heroVideoUrl && currentConfig?.value?.cloudinaryPublicId) {
-      await HeroHistory.create({
-        heroVideoUrl: currentConfig.value.heroVideoUrl,
-        cloudinaryPublicId: currentConfig.value.cloudinaryPublicId,
-        resourceType: currentConfig.value.heroVideoUrl?.includes('/video/') || currentConfig.value.heroVideoUrl?.endsWith('mp4') ? 'video' : 'image',
-        heroHeading: currentConfig.value.heroHeading,
-        heroSubtitle: currentConfig.value.heroSubtitle,
-        expiresAt: new Date(Date.now() + 10 * 24 * 60 * 60 * 1000) // 10 days
-      });
-    }
-
-    // Update setting (merging with existing)
-    await Setting.findOneAndUpdate(
-      { key: 'homePage' },
-      { 
-        $set: {
-          "value.heroVideoUrl": newMediaUrl,
-          "value.cloudinaryPublicId": newPublicId,
-          "value.heroHeading": heroHeading,
-          "value.heroSubtitle": heroSubtitle
-        } 
-      },
-      { upsert: true }
-    );
-
-    await sendSafeMessage(remoteJid, `🎉 *Homepage Hero successfully updated!*\n\n*Heading:* ${heroHeading}\n*Subtitle:* ${heroSubtitle}\n\n_The previous media has been saved for 10 days. Use /hero history to view._`);
-  } catch (e) {
-    console.error("Hero upload error:", e);
-    await sendSafeMessage(remoteJid, "❌ Failed to update hero media: " + e.message);
-  }
-  return true;
+  return false; // Not history or rollback, let conversational AI handle it
 };
 
 const handleAdminPanelUpsert = async (messages) => {
@@ -1668,7 +1592,130 @@ const handleAdminPanelUpsert = async (messages) => {
       const isAudio = !!(msg.message?.audioMessage);
       const isDocument = !!(msg.message?.documentMessage);
       const isVideo = !!(msg.message?.videoMessage);
-      const isUnsupportedMedia = isSticker || isAudio || isDocument || isVideo;
+      
+      const igRegex = /(https:\/\/(?:www\.)?instagram\.com\/(?:p|reel)\/[a-zA-Z0-9_-]+)/i;
+      const igMatch = text.match(igRegex);
+      const igUrl = igMatch ? igMatch[1] : null;
+
+      // ==========================================
+      // 1. HERO CONVERSATIONAL FLOW
+      // ==========================================
+      const isHeroTrigger = /(?:homepage|home page|front page|hero)\b/i.test(text);
+      let heroSession = adminHeroSessions.get(senderId);
+
+      // Start new hero session
+      if (!heroSession && isHeroTrigger) {
+        heroSession = {
+          createdAt: Date.now(),
+          data: {
+            heading: null,
+            subtitle: null,
+            hasMedia: false,
+            mediaBuffer: null,
+            mediaType: null,
+            igUrl: null
+          },
+          history: []
+        };
+        adminHeroSessions.set(senderId, heroSession);
+        console.log(`🤖 [WA-ADMIN]: Initialized new homepage hero session for ${senderId}`);
+      }
+
+      if (heroSession) {
+        const cancelTriggers = ['cancel', 'stop', 'abort', 'quit'];
+        if (cancelTriggers.includes(text.toLowerCase().trim())) {
+          adminHeroSessions.delete(senderId);
+          await sendSafeMessage(remoteJid, "🚫 Homepage update session cancelled.");
+          continue;
+        }
+
+        // Buffer media if sent
+        if (isImage || isVideo || igUrl) {
+          heroSession.data.hasMedia = true;
+          if (igUrl) {
+            heroSession.data.igUrl = igUrl;
+          } else {
+            heroSession.data.mediaBuffer = await downloadMediaMessage(
+              msg, 'buffer', {}, { logger, reuploadRequest: sock.updateMediaMessage }
+            );
+            heroSession.data.mediaType = isVideo ? 'video' : 'image';
+          }
+        }
+
+        const userMsgContent = text || (heroSession.data.hasMedia ? '[User sent a media file]' : '');
+        heroSession.history.push({ role: 'user', content: userMsgContent });
+        
+        const aiResult = await processHeroConversationWithAI({
+          userMessage: userMsgContent,
+          currentData: heroSession.data,
+          conversationHistory: heroSession.history
+        });
+
+        if (!aiResult) {
+          await sendSafeMessage(remoteJid, "⚠️ AI service unavailable. Your session is open, try again in a moment.");
+          continue;
+        }
+
+        if (aiResult.heading) heroSession.data.heading = aiResult.heading;
+        if (aiResult.subtitle) heroSession.data.subtitle = aiResult.subtitle;
+        
+        heroSession.history.push({ role: 'assistant', content: aiResult.naturalReply || "Got it." });
+
+        if (aiResult.isCancel) {
+          adminHeroSessions.delete(senderId);
+          await sendSafeMessage(remoteJid, "🚫 Homepage update session cancelled.");
+          continue;
+        }
+
+        if (aiResult.isDone) {
+          await sendSafeMessage(remoteJid, "⏳ Publishing your homepage updates...");
+          
+          let newMediaUrl = null;
+          let newPublicId = null;
+
+          try {
+            if (heroSession.data.igUrl) {
+              const { stdout } = await execAsync(`yt-dlp -g "${heroSession.data.igUrl}"`);
+              const directUrl = stdout.trim().split('\n')[0];
+              if (!directUrl) throw new Error("yt-dlp could not extract media.");
+              const result = await cloudinaryV2.uploader.upload(directUrl, {
+                folder: 'seekon_hero', resource_type: 'video',
+                api_key: STATUS_CLOUDINARY_CREDS.key, api_secret: STATUS_CLOUDINARY_CREDS.secret, cloud_name: STATUS_CLOUDINARY_CREDS.cloud
+              });
+              newMediaUrl = result.secure_url;
+              newPublicId = result.public_id;
+            } else if (heroSession.data.mediaBuffer) {
+              const result = await uploadToStatusCloudinary(heroSession.data.mediaBuffer, { 
+                folder: 'seekon_hero', resource_type: heroSession.data.mediaType || 'image'
+              });
+              newMediaUrl = result.secure_url;
+              newPublicId = result.public_id;
+            }
+
+            await applyHomepageUpdate(
+              remoteJid,
+              newMediaUrl,
+              newPublicId,
+              heroSession.data.heading,
+              heroSession.data.subtitle
+            );
+          } catch (e) {
+            console.error("Hero conversational update error:", e);
+            await sendSafeMessage(remoteJid, "❌ Failed to update hero: " + e.message);
+          }
+          
+          adminHeroSessions.delete(senderId);
+          continue;
+        }
+
+        await sendSafeMessage(remoteJid, aiResult.naturalReply || "Got it. Please continue.");
+        continue;
+      }
+
+      // ==========================================
+      // 2. PRODUCT UPLOAD CONVERSATIONAL FLOW
+      // ==========================================
+      const isUnsupportedMedia = isSticker || isAudio || isDocument || (isVideo && !heroSession);
 
       let session = adminUploadSessions.get(senderId);
 
