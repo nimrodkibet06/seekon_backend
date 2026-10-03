@@ -32,6 +32,7 @@ import {
 import FlashStatus from '../models/FlashStatus.js';
 import StatusTask  from '../models/StatusTask.js';
 import Setting from '../models/Setting.js';
+import HeroHistory from '../models/HeroHistory.js';
 import { normalizePhone } from '../utils/phoneFormatter.js';
 import User from '../models/User.js';
 import Admin from '../models/Admin.js';
@@ -1443,6 +1444,149 @@ const handleBuyerGroupGhostMode = async (messages) => {
 // ─────────────────────────────────────────────────────────────────────────────
 // Conversational WhatsApp Admin Panel — accepts product uploads from admins.
 // ─────────────────────────────────────────────────────────────────────────────
+// ─────────────────────────────────────────────────────────────────────────────
+// handleHeroCommand - intercepts /hero commands to change homepage media
+// ─────────────────────────────────────────────────────────────────────────────
+const handleHeroCommand = async (msg, text, remoteJid, senderId) => {
+  const parts = text.split(/\s+/);
+  const command = parts[0].toLowerCase();
+  if (command !== '/hero') return false;
+
+  const subCommand = parts[1]?.toLowerCase();
+
+  // 1. History Command
+  if (subCommand === 'history') {
+    const history = await HeroHistory.find().sort({ createdAt: -1 }).limit(10);
+    if (!history.length) {
+      await sendSafeMessage(remoteJid, "⚠️ No previous homepage hero media found in history.");
+      return true;
+    }
+    let reply = "🗓️ *Homepage Hero History (Last 10 Days)*\n\n";
+    history.forEach((h, i) => {
+      reply += `*${i + 1}.* [${h.resourceType?.toUpperCase() || 'VIDEO'}] ${h.heroHeading}\n`;
+      reply += `ID: \`${h._id}\`\nExpires: ${new Date(h.expiresAt).toLocaleDateString()}\n\n`;
+    });
+    reply += `To switch back, use:\n*/hero rollback <ID>*`;
+    await sendSafeMessage(remoteJid, reply);
+    return true;
+  }
+
+  // 2. Rollback Command
+  if (subCommand === 'rollback') {
+    const id = parts[2];
+    if (!id) {
+      await sendSafeMessage(remoteJid, "⚠️ Please provide an ID. Example: /hero rollback 60d...123");
+      return true;
+    }
+    try {
+      const historyRecord = await HeroHistory.findById(id);
+      if (!historyRecord) {
+        await sendSafeMessage(remoteJid, "❌ Record not found or already expired.");
+        return true;
+      }
+      
+      // Save current to history before rollback
+      const currentConfig = await Setting.findOne({ key: 'homePage' });
+      if (currentConfig?.value) {
+        await HeroHistory.create({
+          heroVideoUrl: currentConfig.value.heroVideoUrl,
+          cloudinaryPublicId: currentConfig.value.cloudinaryPublicId || 'unknown',
+          resourceType: currentConfig.value.heroVideoUrl?.includes('/video/') || currentConfig.value.heroVideoUrl?.endsWith('mp4') ? 'video' : 'image',
+          heroHeading: currentConfig.value.heroHeading,
+          heroSubtitle: currentConfig.value.heroSubtitle,
+          expiresAt: new Date(Date.now() + 10 * 24 * 60 * 60 * 1000)
+        });
+      }
+
+      // Apply rollback
+      await Setting.findOneAndUpdate(
+        { key: 'homePage' },
+        { 
+          $set: {
+            "value.heroVideoUrl": historyRecord.heroVideoUrl,
+            "value.cloudinaryPublicId": historyRecord.cloudinaryPublicId,
+            "value.heroHeading": historyRecord.heroHeading,
+            "value.heroSubtitle": historyRecord.heroSubtitle
+          } 
+        },
+        { upsert: true }
+      );
+      await sendSafeMessage(remoteJid, `✅ Homepage Hero rolled back successfully to:\n*${historyRecord.heroHeading}*`);
+    } catch (e) {
+      await sendSafeMessage(remoteJid, "❌ Error during rollback: " + e.message);
+    }
+    return true;
+  }
+
+  // 3. Set new media
+  const isImage = !!(msg.message?.imageMessage);
+  const isVideo = !!(msg.message?.videoMessage);
+  
+  if (!isImage && !isVideo) {
+    await sendSafeMessage(remoteJid, "⚠️ To change the homepage hero, attach a video or image with the caption:\n*/hero Heading | Subtitle*");
+    return true;
+  }
+
+  // Extract heading and subtitle from caption: "/hero My Heading | My Subtitle"
+  const payload = text.replace(/^\/hero/i, '').trim();
+  const [headingStr, subtitleStr] = payload.split('|').map(s => s.trim());
+  const heroHeading = headingStr || "STEP INTO THE FUTURE";
+  const heroSubtitle = subtitleStr || "Discover the latest drops from Nike, Adidas, Jordan, and more.";
+
+  await sendSafeMessage(remoteJid, "⏳ Downloading and uploading new homepage media to Cloudinary...");
+
+  try {
+    const rawBuffer = await downloadMediaMessage(
+      msg,
+      'buffer',
+      {},
+      { logger, reuploadRequest: sock.updateMediaMessage }
+    );
+    
+    const mediaType = isVideo ? 'video' : 'image';
+    const result = await uploadToStatusCloudinary(rawBuffer, { 
+      folder: 'seekon_hero', 
+      resource_type: mediaType 
+    });
+
+    const newMediaUrl = result.secure_url;
+    const newPublicId = result.public_id;
+
+    // Save existing config to history
+    const currentConfig = await Setting.findOne({ key: 'homePage' });
+    if (currentConfig?.value?.heroVideoUrl && currentConfig?.value?.cloudinaryPublicId) {
+      await HeroHistory.create({
+        heroVideoUrl: currentConfig.value.heroVideoUrl,
+        cloudinaryPublicId: currentConfig.value.cloudinaryPublicId,
+        resourceType: currentConfig.value.heroVideoUrl?.includes('/video/') || currentConfig.value.heroVideoUrl?.endsWith('mp4') ? 'video' : 'image',
+        heroHeading: currentConfig.value.heroHeading,
+        heroSubtitle: currentConfig.value.heroSubtitle,
+        expiresAt: new Date(Date.now() + 10 * 24 * 60 * 60 * 1000) // 10 days
+      });
+    }
+
+    // Update setting (merging with existing)
+    await Setting.findOneAndUpdate(
+      { key: 'homePage' },
+      { 
+        $set: {
+          "value.heroVideoUrl": newMediaUrl,
+          "value.cloudinaryPublicId": newPublicId,
+          "value.heroHeading": heroHeading,
+          "value.heroSubtitle": heroSubtitle
+        } 
+      },
+      { upsert: true }
+    );
+
+    await sendSafeMessage(remoteJid, `🎉 *Homepage Hero successfully updated!*\n\n*Heading:* ${heroHeading}\n*Subtitle:* ${heroSubtitle}\n\n_The previous media has been saved for 10 days. Use /hero history to view._`);
+  } catch (e) {
+    console.error("Hero upload error:", e);
+    await sendSafeMessage(remoteJid, "❌ Failed to update hero media: " + e.message);
+  }
+  return true;
+};
+
 const handleAdminPanelUpsert = async (messages) => {
   for (const msg of messages) {
     try {
@@ -1467,6 +1611,7 @@ const handleAdminPanelUpsert = async (messages) => {
         msg.message?.conversation ||
         msg.message?.extendedTextMessage?.text ||
         msg.message?.imageMessage?.caption ||
+        msg.message?.videoMessage?.caption ||
         ''
       ).trim();
 
@@ -1478,6 +1623,11 @@ const handleAdminPanelUpsert = async (messages) => {
       const isSenderAdmin = isSenderOwnNumber || isSenderAuthorized(senderId, authorizedPhones, authorizedLids);
 
       if (!isSenderAdmin && !isFromAdminGroup) continue;
+
+      if (text.toLowerCase().startsWith('/hero')) {
+        const handled = await handleHeroCommand(msg, text, remoteJid, senderId);
+        if (handled) continue;
+      }
 
       const isImage = !!(msg.message?.imageMessage);
       const isSticker = !!(msg.message?.stickerMessage);

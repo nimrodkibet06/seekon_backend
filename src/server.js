@@ -20,6 +20,7 @@ import { connectDB } from './config/db.js';
 import { initBackupService } from './services/backupService.js';
 import { initMpesaSyncCron } from './scripts/stkQueryCron.js';
 import { initStatusCron } from './services/statusCron.js';
+import { initHeroCron } from './services/heroCron.js';
 import './services/imageWorker.js';
 
 import routes from './routes/index.js';
@@ -211,6 +212,8 @@ const startServer = async () => {
     // Start WhatsApp Status Expiry Cron Job
     initStatusCron();
     
+    // Start Hero Media Expiry Cron Job
+    initHeroCron();
     // Start listening
     app.listen(PORT, () => {
       const isProduction = process.env.NODE_ENV === 'production';
