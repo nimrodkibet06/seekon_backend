@@ -29,3 +29,6 @@ Thumbs.db
 # Editor
 .vscode/
 .idea/
+
+# Bulk product images (large binary files — store in cloud storage instead)
+bulk-images/

@@ -3,6 +3,7 @@ import SystemLog from '../models/SystemLog.js';
 import Order from '../models/Order.js';
 import { imageQueue } from '../queues/imageQueue.js';
 import { getGroqClient } from '../utils/groqProvider.js';
+import { deleteFromCloudinary } from '../config/cloudinary.js';
 
 
 // Safe parser helper for arrays in multipart/form-data
@@ -273,7 +274,7 @@ export const updateProduct = async (req, res) => {
 // Delete Product
 export const deleteProduct = async (req, res) => {
   try {
-    const product = await Product.findByIdAndDelete(req.params.id);
+    const product = await Product.findById(req.params.id);
 
     if (!product) {
       return res.status(404).json({
@@ -282,13 +283,55 @@ export const deleteProduct = async (req, res) => {
       });
     }
 
+    // Collect all Cloudinary image URLs from the product
+    const imageUrls = [];
+    if (product.image) imageUrls.push(product.image);
+    if (product.images && product.images.length > 0) {
+      product.images.forEach(url => {
+        if (url && !imageUrls.includes(url)) imageUrls.push(url);
+      });
+    }
+
+    // Extract public_id from each Cloudinary URL and destroy
+    for (const url of imageUrls) {
+      if (url && url.includes('cloudinary.com')) {
+        try {
+          // Cloudinary URL format: .../upload/v1234567890/folder/filename.ext
+          // or with transforms: .../upload/w_400,q_auto/v1234567890/folder/filename.ext
+          const uploadIndex = url.indexOf('/upload/');
+          if (uploadIndex !== -1) {
+            const afterUpload = url.substring(uploadIndex + 8); // skip "/upload/"
+            // Remove any leading transformation segments (contain commas) and version (v + digits)
+            const segments = afterUpload.split('/');
+            const cleanSegments = segments.filter(seg => !seg.includes(',') && !/^v\d+$/.test(seg));
+            // Remove file extension from last segment
+            const lastIdx = cleanSegments.length - 1;
+            if (lastIdx >= 0) {
+              cleanSegments[lastIdx] = cleanSegments[lastIdx].replace(/\.[^.]+$/, '');
+            }
+            const publicId = cleanSegments.join('/');
+            if (publicId) {
+              await deleteFromCloudinary(publicId);
+              console.log(`🗑️ Deleted Cloudinary asset: ${publicId}`);
+            }
+          }
+        } catch (cloudErr) {
+          // Log but don't block product deletion if Cloudinary cleanup fails
+          console.error(`⚠️ Failed to delete Cloudinary asset for URL ${url}:`, cloudErr.message);
+        }
+      }
+    }
+
+    // Delete the MongoDB document
+    await Product.findByIdAndDelete(req.params.id);
+
     // Log action - with error handling to prevent crashes
     try {
       await SystemLog.create({
         action: 'product_deleted',
         actor: req.user?.email || 'system',
         actorType: 'admin',
-        details: { productId: req.params.id },
+        details: { productId: req.params.id, deletedImages: imageUrls.length },
         module: 'product'
       });
     } catch (logError) {
