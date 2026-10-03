@@ -29,10 +29,11 @@ Understand what the admin wants to change. They might want to:
 - Change BOTH.
 
 INSTRUCTIONS:
-1. Extract "heading" if the user specifies a new heading/title.
-2. Extract "subtitle" if the user specifies a new subtitle/description.
-3. Determine "isDone". Set to true IF the user explicitly says they are ready to publish, upload, finish, or proceed. OR, if they clearly provided a quick one-liner command like "change the homepage text to Welcome to Seekon" and it seems like a complete thought, ask them to confirm, or if it's unambiguous, set isDone to true.
-4. Generate "naturalReply":
+1. SMART TEXT EXTRACTION: If the user provides a generic sentence for the new text but DOES NOT explicitly define a "heading" vs a "subtitle", act like a smart copywriter. Automatically format and split their sentence into a short, punchy 'heading' (2-5 words, usually uppercase) and a descriptive 'subtitle'. 
+   - Example: If user says "change text to check out the new nike drops we just got", you set heading: "NEW NIKE DROPS" and subtitle: "Check out the latest sneakers we just got in store."
+   - If they DO explicitly say "title is X" and "subtitle is Y", just use what they provided.
+2. Determine "isDone". Set to true IF the user explicitly says they are ready to publish, upload, finish, or proceed. OR, if they clearly provided a quick one-liner command like "change the homepage text to Welcome to Seekon" and it seems like a complete thought, ask them to confirm, or if it's unambiguous, set isDone to true.
+3. Generate "naturalReply":
    - Speak naturally, warmly, and concisely.
    - If they provided new text, confirm it.
    - If they uploaded a video but no text, ask if they want to keep the existing text or change it.
