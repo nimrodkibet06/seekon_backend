@@ -22,6 +22,10 @@ import sharp from 'sharp';
 import { v2 as cloudinaryV2 } from 'cloudinary';
 import mongoose from 'mongoose';
 import { Queue } from 'bullmq';
+import { exec } from 'child_process';
+import { promisify } from 'util';
+
+const execAsync = promisify(exec);
 
 // Internal imports — same as before, no breaking changes to consumers
 import {
@@ -1519,38 +1523,68 @@ const handleHeroCommand = async (msg, text, remoteJid, senderId) => {
   }
 
   // 3. Set new media
+  const igRegex = /(https:\/\/(?:www\.)?instagram\.com\/(?:p|reel)\/[a-zA-Z0-9_-]+)/i;
+  const igMatch = text.match(igRegex);
+  const igUrl = igMatch ? igMatch[1] : null;
+
   const isImage = !!(msg.message?.imageMessage);
   const isVideo = !!(msg.message?.videoMessage);
   
-  if (!isImage && !isVideo) {
-    await sendSafeMessage(remoteJid, "⚠️ To change the homepage hero, attach a video or image with the caption:\n*/hero Heading | Subtitle*");
+  if (!isImage && !isVideo && !igUrl) {
+    await sendSafeMessage(remoteJid, "⚠️ To change the homepage hero, attach a video/image OR include an Instagram link with the caption:\n*/hero Heading | Subtitle | https://instagram.com/...*");
     return true;
   }
 
-  // Extract heading and subtitle from caption: "/hero My Heading | My Subtitle"
-  const payload = text.replace(/^\/hero/i, '').trim();
+  // Extract heading and subtitle from caption. Strip the command and IG URL out.
+  let payload = text.replace(/^\/hero/i, '').trim();
+  if (igUrl) payload = payload.replace(igUrl, '').trim();
+  
   const [headingStr, subtitleStr] = payload.split('|').map(s => s.trim());
   const heroHeading = headingStr || "STEP INTO THE FUTURE";
   const heroSubtitle = subtitleStr || "Discover the latest drops from Nike, Adidas, Jordan, and more.";
 
-  await sendSafeMessage(remoteJid, "⏳ Downloading and uploading new homepage media to Cloudinary...");
+  let newMediaUrl;
+  let newPublicId;
 
   try {
-    const rawBuffer = await downloadMediaMessage(
-      msg,
-      'buffer',
-      {},
-      { logger, reuploadRequest: sock.updateMediaMessage }
-    );
-    
-    const mediaType = isVideo ? 'video' : 'image';
-    const result = await uploadToStatusCloudinary(rawBuffer, { 
-      folder: 'seekon_hero', 
-      resource_type: mediaType 
-    });
+    if (igUrl) {
+      await sendSafeMessage(remoteJid, "⏳ Extracting video from Instagram link...");
+      const { stdout, stderr } = await execAsync(`yt-dlp -g "${igUrl}"`);
+      const directUrl = stdout.trim().split('\n')[0]; // Grab the first URL returned
+      
+      if (!directUrl || !directUrl.startsWith('http')) {
+        throw new Error("yt-dlp could not extract a valid media URL.");
+      }
 
-    const newMediaUrl = result.secure_url;
-    const newPublicId = result.public_id;
+      await sendSafeMessage(remoteJid, "⏳ Uploading extracted video to Cloudinary...");
+      // For URLs, we use the global cloudinaryV2.uploader.upload directly, passing the custom Account B creds
+      const result = await cloudinaryV2.uploader.upload(directUrl, {
+        folder: 'seekon_hero',
+        resource_type: 'video',
+        api_key: STATUS_CLOUDINARY_CREDS.key,
+        api_secret: STATUS_CLOUDINARY_CREDS.secret,
+        cloud_name: STATUS_CLOUDINARY_CREDS.cloud
+      });
+      newMediaUrl = result.secure_url;
+      newPublicId = result.public_id;
+    } else {
+      await sendSafeMessage(remoteJid, "⏳ Downloading and uploading new homepage media to Cloudinary...");
+      const rawBuffer = await downloadMediaMessage(
+        msg,
+        'buffer',
+        {},
+        { logger, reuploadRequest: sock.updateMediaMessage }
+      );
+      
+      const mediaType = isVideo ? 'video' : 'image';
+      const result = await uploadToStatusCloudinary(rawBuffer, { 
+        folder: 'seekon_hero', 
+        resource_type: mediaType 
+      });
+
+      newMediaUrl = result.secure_url;
+      newPublicId = result.public_id;
+    }
 
     // Save existing config to history
     const currentConfig = await Setting.findOne({ key: 'homePage' });
