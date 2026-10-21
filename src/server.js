@@ -5,10 +5,17 @@ dotenv.config();
 import dns from 'dns';
 dns.setServers(['8.8.8.8', '1.1.1.1']);
 
-import * as Sentry from '@sentry/node';
+// Graceful Sentry Observability Loader (Layer 12: Error Tracking & Observability)
+let Sentry = null;
+try {
+  Sentry = await import('@sentry/node');
+} catch (e) {
+  console.warn('⚠️ @sentry/node is not installed or failed to load. Sentry observability will remain inert.');
+}
 
 // Initialize Sentry Observability (Layer 12: Error Tracking & Observability)
 export const initSentry = (dsn = process.env.SENTRY_DSN) => {
+  if (!Sentry) return null;
   const cleanDsn = dsn?.trim();
   if (!cleanDsn) {
     console.warn('⚠️ SENTRY_DSN is not configured. Sentry observability will remain inert.');
@@ -35,7 +42,7 @@ initSentry();
 // Global Process-Level Error Handlers (Unhandled Promise Rejections & Uncaught Exceptions)
 export const handleUnhandledRejection = (reason) => {
   console.error('🔥 UNHANDLED PROMISE REJECTION:', reason);
-  if (process.env.SENTRY_DSN || Sentry.getClient()) {
+  if (Sentry && (process.env.SENTRY_DSN || Sentry.getClient?.())) {
     Sentry.captureException(reason, {
       extra: { type: 'unhandledRejection' }
     });
@@ -44,7 +51,7 @@ export const handleUnhandledRejection = (reason) => {
 
 export const handleUncaughtException = (error) => {
   console.error('🔥 UNCAUGHT EXCEPTION:', error);
-  if (process.env.SENTRY_DSN || Sentry.getClient()) {
+  if (Sentry && (process.env.SENTRY_DSN || Sentry.getClient?.())) {
     Sentry.captureException(error, {
       extra: { type: 'uncaughtException' }
     });
@@ -223,7 +230,9 @@ app.use('/api', routes);
 app.use('/api/settings', settingRoutes);
 
 // Sentry Express error handler (instruments Express errors before custom handler)
-Sentry.setupExpressErrorHandler(app);
+if (Sentry && typeof Sentry.setupExpressErrorHandler === 'function') {
+  Sentry.setupExpressErrorHandler(app);
+}
 
 // Global Error Handler (Must be after Sentry setup and routes)
 export const sentryErrorHandler = (err, req, res, next) => {
@@ -232,7 +241,7 @@ export const sentryErrorHandler = (err, req, res, next) => {
   const statusCode = err.statusCode || err.status || 500;
 
   // Report critical errors (HTTP 5xx or unhandled server errors) to Sentry before responding
-  if (statusCode >= 500 && (process.env.SENTRY_DSN || Sentry.getClient())) {
+  if (statusCode >= 500 && Sentry && (process.env.SENTRY_DSN || Sentry.getClient?.())) {
     Sentry.captureException(err, {
       extra: {
         path: req.originalUrl || req.url,
