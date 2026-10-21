@@ -2046,6 +2046,8 @@ const handleAdminPanelUpsert = async (messages) => {
 // ─────────────────────────────────────────────────────────────────────────────
 // Headless WhatsApp Order Pool — Command Center Listener
 // ─────────────────────────────────────────────────────────────────────────────
+const normalizeJid = (jid = '') => String(jid || '').replace(/['"]/g, '').trim();
+
 const commandCenterGroupJid = normalizeJid(
   process.env.COMMAND_CENTER_GROUP_JID ||
   process.env.ADMIN_GROUP_JID ||
