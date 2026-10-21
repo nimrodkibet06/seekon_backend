@@ -1,4 +1,11 @@
 import PDFDocument from 'pdfkit';
+import fs from 'fs';
+import path from 'path';
+import { fileURLToPath } from 'url';
+
+const __filename = fileURLToPath(import.meta.url);
+const __dirname = path.dirname(__filename);
+const LOCAL_LOGO_PATH = path.resolve(__dirname, '../assets/seekon_bg-removebg-preview.png');
 
 /**
  * Generates an in-memory branded PDF e-receipt for walk-in / POS orders.
@@ -12,8 +19,8 @@ export const generateReceiptPDF = async (order, options = {}) => {
   return new Promise((resolve, reject) => {
     try {
       const doc = new PDFDocument({
-        size: [300, 680], // Compact mobile-optimized receipt format (approx 105mm x 240mm)
-        margins: { top: 20, bottom: 20, left: 18, right: 18 }
+        size: [300, 700], // Compact mobile-optimized receipt format
+        margins: { top: 16, bottom: 20, left: 18, right: 18 }
       });
 
       const chunks = [];
@@ -26,20 +33,40 @@ export const generateReceiptPDF = async (order, options = {}) => {
       const RIGHT_X = PAGE_WIDTH - 18;
       const CONTENT_WIDTH = RIGHT_X - LEFT_X;
 
-      // 1. BRAND HEADER
-      doc.rect(0, 0, PAGE_WIDTH, 48).fill('#000000');
+      // 1. BRAND HEADER WITH LOGO INTEGRATION
+      const hasLogo = fs.existsSync(LOCAL_LOGO_PATH);
+      const HEADER_HEIGHT = hasLogo ? 62 : 48;
 
-      doc.fillColor('#FFFFFF')
-         .fontSize(16)
-         .font('Helvetica-Bold')
-         .text('SEEKON', LEFT_X, 12, { width: CONTENT_WIDTH, align: 'center', characterSpacing: 2 });
+      doc.rect(0, 0, PAGE_WIDTH, HEADER_HEIGHT).fill('#09090b'); // Obsidian glass / zinc-950
 
-      doc.fontSize(7)
-         .font('Helvetica')
-         .fillColor('#D1D5DB')
-         .text('PREMIUM STREETWEAR & APPAREL', LEFT_X, 32, { width: CONTENT_WIDTH, align: 'center', characterSpacing: 1 });
+      if (hasLogo) {
+        // Centered official Seekon brand logo
+        try {
+          doc.image(LOCAL_LOGO_PATH, (PAGE_WIDTH - 90) / 2, 8, { width: 90 });
+        } catch (imgErr) {
+          console.warn('Receipt logo draw fallback:', imgErr.message);
+          doc.fillColor('#FFFFFF')
+             .fontSize(16)
+             .font('Helvetica-Bold')
+             .text('SEEKON', LEFT_X, 14, { width: CONTENT_WIDTH, align: 'center', characterSpacing: 2 });
+        }
+        doc.fontSize(6.5)
+           .font('Helvetica-Bold')
+           .fillColor('#10B981')
+           .text('OFFICIAL E-RECEIPT  •  WALK-IN SALE', LEFT_X, 48, { width: CONTENT_WIDTH, align: 'center', characterSpacing: 1.2 });
+      } else {
+        doc.fillColor('#FFFFFF')
+           .fontSize(16)
+           .font('Helvetica-Bold')
+           .text('SEEKON', LEFT_X, 12, { width: CONTENT_WIDTH, align: 'center', characterSpacing: 2 });
 
-      let currentY = 56;
+        doc.fontSize(7)
+           .font('Helvetica')
+           .fillColor('#D1D5DB')
+           .text('PREMIUM STREETWEAR & APPAREL', LEFT_X, 32, { width: CONTENT_WIDTH, align: 'center', characterSpacing: 1 });
+      }
+
+      let currentY = HEADER_HEIGHT + 8;
 
       // 2. STORE CONTACT & LOCATIONS
       doc.fontSize(6.5)

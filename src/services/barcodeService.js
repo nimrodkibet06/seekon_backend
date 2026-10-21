@@ -1,5 +1,12 @@
 import PDFDocument from 'pdfkit';
 import bwipjs from 'bwip-js';
+import fs from 'fs';
+import path from 'path';
+import { fileURLToPath } from 'url';
+
+const __filename = fileURLToPath(import.meta.url);
+const __dirname = path.dirname(__filename);
+const LOCAL_LOGO_PATH = path.resolve(__dirname, '../assets/seekon_bg-removebg-preview.png');
 
 /**
  * Deterministically derives a 12-digit numeric barcode from a MongoDB ObjectId.
@@ -108,20 +115,33 @@ export const generateBarcodeSheetPDF = async ({
         doc.addPage();
 
         // 1. Header Section
-        doc.fontSize(8)
+        const hasLogo = fs.existsSync(LOCAL_LOGO_PATH);
+        if (hasLogo) {
+          try {
+            doc.image(LOCAL_LOGO_PATH, PAGE_WIDTH - MARGIN_LEFT - 75, 8, { width: 75 });
+          } catch (e) {
+            // Fallback
+          }
+        }
+
+        doc.fontSize(8.5)
            .font('Helvetica-Bold')
-           .fillColor('#111827')
-           .text('SEEKON APPAREL', MARGIN_LEFT, 15, { continued: true })
+           .fillColor('#09090b')
+           .text('SEEKON APPAREL', MARGIN_LEFT, 13, { continued: true })
            .font('Helvetica')
-           .fillColor('#6B7280')
+           .fillColor('#71717a')
            .text(` | ${title.toUpperCase()} — Page ${pageIdx + 1} of ${totalPages}`);
 
         doc.fontSize(6)
-           .fillColor('#9CA3AF')
-           .text(`${sheetSubtitle} • Generated ${new Date().toLocaleDateString('en-KE')}`, MARGIN_LEFT, 26);
+           .fillColor('#10B981')
+           .font('Helvetica-Bold')
+           .text('OFFICIAL BARCODE SHEET', MARGIN_LEFT, 24, { continued: true })
+           .font('Helvetica')
+           .fillColor('#a1a1aa')
+           .text(` • ${sheetSubtitle} • ${new Date().toLocaleDateString('en-KE')}`);
 
         // Header separator line
-        doc.strokeColor('#E5E7EB')
+        doc.strokeColor('#E4E4E7')
            .lineWidth(0.5)
            .moveTo(MARGIN_LEFT, 33)
            .lineTo(PAGE_WIDTH - MARGIN_LEFT, 33)
