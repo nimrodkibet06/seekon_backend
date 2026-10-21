@@ -1,6 +1,7 @@
 import Product from '../models/Product.js';
 import Order from '../models/Order.js';
 import PendingOrder from '../models/PendingOrder.js';
+import User from '../models/User.js';
 import { getProductBarcode, generateBarcodeSheetPDF } from '../services/barcodeService.js';
 import { generateReceiptPDF } from '../services/receiptService.js';
 import { sendWhatsAppReceipt } from '../config/whatsapp.js';
@@ -13,10 +14,11 @@ import { normalizePhone } from '../utils/phoneFormatter.js';
  */
 export const searchProductsForPOS = async (req, res) => {
   try {
-    const { q = '' } = req.query;
+    const { q = '', limit = 1000, category = '', inStock } = req.query;
+    // Don't exclude active inventory - pull full product catalog
     const query = { status: { $ne: 'inactive' } };
 
-    if (q.trim()) {
+    if (q && q.trim()) {
       const cleanQ = q.trim();
       const regex = new RegExp(cleanQ, 'i');
 
@@ -29,14 +31,29 @@ export const searchProductsForPOS = async (req, res) => {
       ];
     }
 
+    if (category && category !== 'All' && category !== 'ALL') {
+      query.category = new RegExp(`^${category}$`, 'i');
+    }
+
+    if (inStock === 'true' || inStock === true) {
+      query.stock = { $gt: 0 };
+    }
+
+    const maxLimit = Math.min(2000, parseInt(limit, 10) || 1000);
+
     const products = await Product.find(query)
-      .select('name price originalPrice image images stock inStock sizes colors category brand barcode sku')
-      .limit(30)
+      .select('name price originalPrice discount stock inStock sizes colors category subCategory brand image images barcode sku isFlashSale flashSalePrice saleStartTime saleEndTime createdAt')
+      .sort({ createdAt: -1 })
+      .limit(maxLimit)
       .lean();
 
     // Ensure barcode is populated on every returned product
     const enhancedProducts = products.map(prod => ({
       ...prod,
+      image: prod.image || prod.images?.[0] || '',
+      images: prod.images || (prod.image ? [prod.image] : []),
+      stock: typeof prod.stock === 'number' ? prod.stock : 0,
+      inStock: (typeof prod.stock === 'number' ? prod.stock > 0 : true) && prod.inStock !== false,
       barcode: getProductBarcode(prod)
     }));
 
@@ -51,6 +68,52 @@ export const searchProductsForPOS = async (req, res) => {
       success: false,
       message: 'Failed to search products for POS'
     });
+  }
+};
+
+/**
+ * @route   GET /api/pos/customers/lookup
+ * @desc    Lookup customer account by phone number
+ * @access  Private (Admin, Cashier)
+ */
+export const lookupCustomerByPhone = async (req, res) => {
+  try {
+    const { phone = '' } = req.query;
+    const cleanPhone = normalizePhone(phone);
+    if (!cleanPhone) {
+      return res.status(400).json({ success: false, message: 'Valid phone number required' });
+    }
+
+    const last9 = cleanPhone.slice(-9);
+    const user = await User.findOne({
+      $or: [
+        { phoneNumber: { $regex: last9 } },
+        { phone: { $regex: last9 } }
+      ]
+    }).select('_id name email phoneNumber role').lean();
+
+    if (!user) {
+      return res.status(200).json({
+        success: true,
+        found: false,
+        customerPhone: cleanPhone,
+        message: 'No registered user found with this phone number'
+      });
+    }
+
+    res.status(200).json({
+      success: true,
+      found: true,
+      user: {
+        _id: user._id,
+        name: user.name,
+        email: user.email,
+        phone: user.phoneNumber || user.phone || cleanPhone
+      }
+    });
+  } catch (error) {
+    console.error('Customer lookup error:', error);
+    res.status(500).json({ success: false, message: 'Failed to lookup customer' });
   }
 };
 
@@ -234,8 +297,27 @@ export const checkoutPOSSale = async (req, res) => {
       });
     }
 
-    // 4. Create Order Record
+    // 4. Create Order Record and optionally link customer user account
     const cleanPhone = customerPhone ? normalizePhone(customerPhone) : '';
+    let matchedUserId = null;
+    let finalCustomerName = customerName || 'Walk-in Customer';
+
+    if (cleanPhone) {
+      const last9 = cleanPhone.slice(-9);
+      const matchedUser = await User.findOne({
+        $or: [
+          { phoneNumber: { $regex: last9 } },
+          { phone: { $regex: last9 } }
+        ]
+      }).select('_id name email phoneNumber');
+
+      if (matchedUser) {
+        matchedUserId = matchedUser._id;
+        if (!customerName || customerName === 'Walk-in Customer') {
+          finalCustomerName = matchedUser.name;
+        }
+      }
+    }
 
     const order = await Order.create({
       items: orderItems,
@@ -246,6 +328,7 @@ export const checkoutPOSSale = async (req, res) => {
         mpesa: mpesaAmount
       },
       orderSource: 'pos',
+      user: matchedUserId,
       cashier: req.user?._id,
       isPaid: true,
       paidAt: new Date(),
@@ -253,7 +336,7 @@ export const checkoutPOSSale = async (req, res) => {
       guestPhone: cleanPhone,
       contactEmail: `pos-${Date.now()}@seekon.local`,
       shippingAddress: {
-        name: customerName,
+        name: finalCustomerName,
         phone: cleanPhone,
         address: 'Seekon Physical Store Walk-in',
         city: 'Nairobi',

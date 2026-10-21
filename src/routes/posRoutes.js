@@ -2,6 +2,7 @@ import express from 'express';
 import { authMiddleware, authorizeRoles } from '../middleware/auth.js';
 import {
   searchProductsForPOS,
+  lookupCustomerByPhone,
   generateProductBarcodeSheet,
   generateCategoryBarcodeSheet,
   checkoutPOSSale,
@@ -37,6 +38,12 @@ router.get('/verify-access', (req, res) => {
  * @desc    Search products by name, barcode, or SKU
  */
 router.get('/products/search', searchProductsForPOS);
+
+/**
+ * @route   GET /api/pos/customers/lookup
+ * @desc    Lookup customer account by phone number
+ */
+router.get('/customers/lookup', lookupCustomerByPhone);
 
 /**
  * @route   GET /api/pos/barcodes/product/:id
