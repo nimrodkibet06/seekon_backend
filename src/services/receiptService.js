@@ -173,10 +173,11 @@ export const generateReceiptPDF = async (order, options = {}) => {
           doc.font('Helvetica-Bold').fillColor('#111827').text(order.deliveryDetails.location);
         }
 
-        if (order.deliveryDetails?.riderNotes) {
+        const riderNoteText = (order.deliveryDetails?.riderNotes || '').trim();
+        if (riderNoteText && !riderNoteText.toLowerCase().includes('interception')) {
           currentY += 11;
           doc.font('Helvetica').fillColor('#6B7280').text('Rider Note: ', LEFT_X, currentY, { continued: true });
-          doc.font('Helvetica-Bold').fillColor('#B45309').text(order.deliveryDetails.riderNotes);
+          doc.font('Helvetica-Bold').fillColor('#B45309').text(riderNoteText);
         }
       }
 

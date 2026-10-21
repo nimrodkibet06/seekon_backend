@@ -2179,7 +2179,7 @@ const handleCommandCenterOrderUpsert = async (messages) => {
             customerPhone: cleanCustomerPhone,
             location: deliveryLocation,
             deliveryFee: 0,
-            riderNotes: `Interception via WhatsApp by ${servedBy} (+${senderPhone})`
+            riderNotes: (parsed.riderNotes || '').trim()
           },
           items: [{
             product: matchedProd._id,

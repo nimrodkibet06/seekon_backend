@@ -285,8 +285,9 @@ Notes: Walk-in collection at Kilimani`;
   assert(parsedUserCase.customerName === 'Nick', `Conversational drop extracted customer name "Nick": got "${parsedUserCase.customerName}"`);
   assert(parsedUserCase.customerPhone === '254727672772', `Conversational drop extracted phone: "${parsedUserCase.customerPhone}"`);
   assert(parsedUserCase.location === 'Juja', `Conversational drop extracted location "Juja": "${parsedUserCase.location}"`);
+  assert(parsedUserCase.riderNotes === '', `Conversational drop has empty rider notes when none provided: got "${parsedUserCase.riderNotes}"`);
 
-  // Test "Served by: [Username]" in PDF generator
+  // Test "Served by: [Username]" in PDF generator (with clean empty riderNotes)
   const interceptedOrder = new Order({
     _id: new mongoose.Types.ObjectId(),
     orderType: 'social-delivery',
@@ -303,7 +304,7 @@ Notes: Walk-in collection at Kilimani`;
       customerPhone: '254712345678',
       location: 'Nairobi',
       deliveryFee: 0,
-      riderNotes: 'Auto-interception'
+      riderNotes: ''
     },
     notes: 'WhatsApp Auto-POS Interception • Served by Alex Mwangi'
   });

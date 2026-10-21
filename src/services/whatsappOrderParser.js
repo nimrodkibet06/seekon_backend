@@ -195,6 +195,7 @@ export const parseWhatsAppOrderText = async (text) => {
     paymentMethod: 'POD',
     payments: { cash: 0, mpesa: 0 },
     notes: '',
+    riderNotes: '',
     location: '',
     size: 'Standard',
     quantity: 1,
@@ -270,6 +271,17 @@ export const parseWhatsAppOrderText = async (text) => {
     }
   }
 
+  // 5b. Extract Explicit Rider Note (ONLY if staff explicitly specified one; otherwise empty)
+  const riderNoteMatch = text.match(
+    /(?:rider\s*notes?|rider\s*instructions?|delivery\s*notes?)\s*[:=-]\s*([^\n,;]+)/i
+  );
+  if (riderNoteMatch && riderNoteMatch[1].trim()) {
+    const rawNote = riderNoteMatch[1].trim();
+    if (!rawNote.toLowerCase().includes('interception') && !phoneRegex.test(rawNote)) {
+      result.riderNotes = rawNote;
+    }
+  }
+
   // 6. Extract Payment Details if specified
   if (/cash/i.test(text) && /mpesa|m-pesa/i.test(text)) {
     result.paymentMethod = 'Split';
@@ -298,6 +310,9 @@ export const parseWhatsAppOrderText = async (text) => {
   if (result.location) cleanQuery = cleanQuery.replace(new RegExp(`\\b${result.location}\\b`, 'gi'), ' ');
   if (result.customerName && result.customerName !== 'WhatsApp Customer') {
     cleanQuery = cleanQuery.replace(new RegExp(`\\b${result.customerName}\\b`, 'gi'), ' ');
+  }
+  if (result.riderNotes) {
+    cleanQuery = cleanQuery.replace(new RegExp(`\\b${result.riderNotes}\\b`, 'gi'), ' ');
   }
 
   // Strip conversational noise words & phrases
