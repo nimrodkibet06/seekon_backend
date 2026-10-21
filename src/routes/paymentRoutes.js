@@ -11,6 +11,7 @@ import {
   handleMpesaCallback
 } from '../controllers/paymentController.js';
 import { authMiddleware } from '../middleware/auth.js';
+import { safaricomIpWhitelist } from '../middleware/safaricomIpWhitelist.js';
 
 const router = express.Router();
 
@@ -35,7 +36,7 @@ const stkPushValidation = [
 
 // M-Pesa (Daraja) payment routes
 router.post('/stk-push', paymentLimiter, stkPushValidation, initiateSTKPush);
-router.post('/mpesa-callback', handleMpesaCallback);
+router.post('/mpesa-callback', safaricomIpWhitelist, handleMpesaCallback);
 
 // Paystack payment routes
 router.post('/paystack/initialize', authMiddleware, paymentLimiter, initializePaystackPayment);

@@ -42,7 +42,7 @@ const client = new OAuth2Client(process.env.GOOGLE_CLIENT_ID);
  */
 export const googleAuth = async (req, res) => {
   try {
-    const { credential } = req.body;
+    const { credential, phoneNumber, phone } = req.body;
 
     if (!credential) {
       return res.status(400).json({
@@ -120,14 +120,22 @@ export const googleAuth = async (req, res) => {
         googleId,
         authProvider: 'google',
         profilePhoto: picture || '',
-        isVerified: true, // Google emails are already verified
+        isVerified: true,
+      phoneNumber: (phoneNumber || phone || '').trim(), // Google emails are already verified
         isActive: true // Ensure new users are active
       });
 
       // ORDER CLAIMING: Link previous guest orders to this new account
       try {
         const result = await Order.updateMany(
-          { guestEmail: email.toLowerCase(), isGuestCheckout: true },
+          {
+            isGuestCheckout: true,
+            $or: [
+              { guestEmail: email.toLowerCase() },
+              { contactEmail: email.toLowerCase() },
+              ...((phoneNumber || phone) ? [{ guestPhone: (phoneNumber || phone).trim() }, { 'shippingAddress.phone': (phoneNumber || phone).trim() }] : [])
+            ]
+          },
           { user: user._id, isGuestCheckout: false }
         );
         if (result.modifiedCount > 0) {
@@ -267,7 +275,7 @@ export const sendVerificationCode = async (req, res) => {
  */
 export const register = async (req, res) => {
   try {
-    const { name, email, password, verificationCode } = req.body;
+    const { name, email, password, verificationCode, phoneNumber, phone } = req.body;
 
     // Validate input
     if (!name || !email || !password || !verificationCode) {
@@ -371,7 +379,8 @@ export const register = async (req, res) => {
       name,
       email,
       password,
-      isVerified: true
+      isVerified: true,
+      phoneNumber: (phoneNumber || phone || '').trim()
     });
 
     // ORDER CLAIMING: Link previous guest orders to this new account
@@ -583,7 +592,7 @@ export const login = async (req, res) => {
  */
 export const unifiedAuth = async (req, res) => {
   try {
-    const { email, password, name, rememberMe } = req.body;
+    const { email, password, name, rememberMe, phoneNumber, phone } = req.body;
 
     // SECURITY: Block disposable emails
     if (await isEmailDisposable(email)) {
@@ -635,14 +644,22 @@ export const unifiedAuth = async (req, res) => {
       user = await User.create({
         name,
         email,
-        password
+        password,
+        phoneNumber: (phoneNumber || phone || '').trim()
       });
       isNewUser = true;
 
       // ORDER CLAIMING: Link previous guest orders to this new account
       try {
         const result = await Order.updateMany(
-          { guestEmail: email.toLowerCase(), isGuestCheckout: true },
+          {
+            isGuestCheckout: true,
+            $or: [
+              { guestEmail: email.toLowerCase() },
+              { contactEmail: email.toLowerCase() },
+              ...((phoneNumber || phone) ? [{ guestPhone: (phoneNumber || phone).trim() }, { 'shippingAddress.phone': (phoneNumber || phone).trim() }] : [])
+            ]
+          },
           { user: user._id, isGuestCheckout: false }
         );
         if (result.modifiedCount > 0) {

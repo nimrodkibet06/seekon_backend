@@ -19,7 +19,8 @@ const orderSchema = new mongoose.Schema({
   },
   contactEmail: {
     type: String,
-    required: [true, 'Contact email is required'],
+    required: false,
+    default: '',
     lowercase: true,
     trim: true
   },
@@ -37,8 +38,8 @@ const orderSchema = new mongoose.Schema({
     price: { type: Number, required: true },
     quantity: { type: Number, required: true },
     size: String,
-    color: { type: String, required: true },
-    image: { type: String, required: true }
+    color: { type: String, default: 'Standard' },
+    image: { type: String, default: '' }
   }],
   totalAmount: {
     type: Number,
@@ -47,8 +48,30 @@ const orderSchema = new mongoose.Schema({
   },
   paymentMethod: {
     type: String,
-    enum: ['M-Pesa', 'Card', 'Flutterwave', 'Paystack', 'm-pesa', 'card', 'flutterwave', 'paystack'],
+    enum: ['M-Pesa', 'Card', 'Flutterwave', 'Paystack', 'Cash', 'Split', 'm-pesa', 'card', 'flutterwave', 'paystack', 'cash', 'split'],
     default: 'M-Pesa'
+  },
+  payments: {
+    cash: {
+      type: Number,
+      default: 0,
+      min: [0, 'Cash payment cannot be negative']
+    },
+    mpesa: {
+      type: Number,
+      default: 0,
+      min: [0, 'M-Pesa payment cannot be negative']
+    }
+  },
+  orderSource: {
+    type: String,
+    enum: ['online', 'pos', 'whatsapp'],
+    default: 'online'
+  },
+  cashier: {
+    type: mongoose.Schema.Types.ObjectId,
+    ref: 'User',
+    required: false
   },
   paymentReference: {
     type: String

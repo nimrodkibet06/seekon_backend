@@ -43,7 +43,7 @@ import {
   deleteCoupon,
   toggleCouponStatus
 } from '../controllers/couponController.js';
-import { authMiddleware, adminMiddleware } from '../middleware/auth.js';
+import { authMiddleware, adminMiddleware, authorizeRoles } from '../middleware/auth.js';
 import Notification from '../models/Notification.js';
 import { getStatus, initWhatsAppClient, logoutWhatsAppClient } from '../config/whatsapp.js';
 import { uploadQueueMultiple } from '../middleware/queueUpload.js';
@@ -170,16 +170,16 @@ router.patch('/users/:id/role', authMiddleware, adminMiddleware, async (req, res
     const { role } = req.body;
     
     // Validate role
-    if (!['user', 'admin'].includes(role)) {
+    if (!['user', 'cashier', 'admin'].includes(role)) {
       return res.status(400).json({
         success: false,
-        message: 'Invalid role. Must be "user" or "admin"'
+        message: 'Invalid role. Must be "user", "cashier", or "admin"'
       });
     }
     
     const user = await User.findByIdAndUpdate(
       id,
-      { role },
+      { role, isAdmin: role === 'admin' },
       { new: true }
     );
     
@@ -211,9 +211,9 @@ router.put('/users/:id/reactivate', authMiddleware, adminMiddleware, reactivateU
 // Product management
 router.get('/products', authMiddleware, adminMiddleware, getAllProducts);
 router.get('/products/:id', authMiddleware, adminMiddleware, getProduct);
-router.post('/products', authMiddleware, adminMiddleware, uploadQueueMultiple, createProduct);
-router.post('/products/generate-description', authMiddleware, adminMiddleware, generateDescription);
-router.put('/products/:id', authMiddleware, adminMiddleware, updateProduct);
+router.post('/products', authMiddleware, authorizeRoles('admin', 'cashier'), uploadQueueMultiple, createProduct);
+router.post('/products/generate-description', authMiddleware, authorizeRoles('admin', 'cashier'), generateDescription);
+router.put('/products/:id', authMiddleware, authorizeRoles('admin', 'cashier'), updateProduct);
 router.delete('/products/:id', authMiddleware, adminMiddleware, deleteProduct);
 
 // Order management

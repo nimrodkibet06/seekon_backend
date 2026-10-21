@@ -1,4 +1,4 @@
-﻿# Dependencies
+# Dependencies
 node_modules/
 
 # Environment variables — never commit secrets
@@ -32,3 +32,6 @@ Thumbs.db
 
 # Bulk product images (large binary files — store in cloud storage instead)
 bulk-images/
+
+# Agent caches
+.agents/

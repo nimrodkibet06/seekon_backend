@@ -1,4 +1,6 @@
 import jwt from 'jsonwebtoken';
+import User from '../models/User.js';
+import Admin from '../models/Admin.js';
 
 /**
  * Middleware to verify JWT token
@@ -98,8 +100,62 @@ export const optionalAuthMiddleware = (req, res, next) => {
 };
 
 /**
- * Middleware to check if user is admin
+ * Role Authorization Middlewares
  */
+/**
+ * Middleware to authorize specific roles (RBAC)
+ * Allows access if user has one of the specified roles (e.g., 'admin', 'cashier')
+ */
+export const authorizeRoles = (...roles) => {
+  return async (req, res, next) => {
+    try {
+      if (!req.user) {
+        return res.status(401).json({
+          success: false,
+          message: 'Access denied. Authentication required.'
+        });
+      }
+
+      let userRole = req.user.role;
+
+      // Database fallback if role is not present in the JWT payload
+      if (!userRole && req.user._id) {
+        const user = await User.findById(req.user._id).select('role isAdmin');
+        if (user) {
+          userRole = user.role || (user.isAdmin ? 'admin' : 'user');
+          req.user.role = userRole;
+        } else {
+          const admin = await Admin.findById(req.user._id).select('role');
+          if (admin) {
+            userRole = admin.role || 'admin';
+            req.user.role = userRole;
+          }
+        }
+      }
+
+      // Allow superadmin access to any admin-permitted route
+      if (userRole === 'superadmin' && roles.includes('admin')) {
+        return next();
+      }
+
+      if (!roles.includes(userRole)) {
+        return res.status(403).json({
+          success: false,
+          message: `Access denied. Role '${userRole || 'unauthorized'}' is not authorized to access this route.`
+        });
+      }
+
+      next();
+    } catch (error) {
+      console.error('Role authorization error:', error);
+      return res.status(500).json({
+        success: false,
+        message: 'Internal authorization error'
+      });
+    }
+  };
+};
+
 export const adminMiddleware = (req, res, next) => {
   if (!req.user || (req.user.role !== 'admin' && req.user.role !== 'superadmin')) {
     return res.status(403).json({

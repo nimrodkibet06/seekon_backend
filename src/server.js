@@ -5,6 +5,58 @@ dotenv.config();
 import dns from 'dns';
 dns.setServers(['8.8.8.8', '1.1.1.1']);
 
+import * as Sentry from '@sentry/node';
+
+// Initialize Sentry Observability (Layer 12: Error Tracking & Observability)
+export const initSentry = (dsn = process.env.SENTRY_DSN) => {
+  const cleanDsn = dsn?.trim();
+  if (!cleanDsn) {
+    console.warn('⚠️ SENTRY_DSN is not configured. Sentry observability will remain inert.');
+    return null;
+  }
+
+  try {
+    Sentry.init({
+      dsn: cleanDsn,
+      environment: process.env.NODE_ENV || 'development',
+      tracesSampleRate: process.env.NODE_ENV === 'production' ? 0.1 : 1.0,
+    });
+    console.log('📡 Sentry observability initialized successfully.');
+    return Sentry.getClient();
+  } catch (err) {
+    console.warn('⚠️ Failed to initialize Sentry:', err.message);
+    return null;
+  }
+};
+
+// Initialize Sentry with environment configuration
+initSentry();
+
+// Global Process-Level Error Handlers (Unhandled Promise Rejections & Uncaught Exceptions)
+export const handleUnhandledRejection = (reason) => {
+  console.error('🔥 UNHANDLED PROMISE REJECTION:', reason);
+  if (process.env.SENTRY_DSN || Sentry.getClient()) {
+    Sentry.captureException(reason, {
+      extra: { type: 'unhandledRejection' }
+    });
+  }
+};
+
+export const handleUncaughtException = (error) => {
+  console.error('🔥 UNCAUGHT EXCEPTION:', error);
+  if (process.env.SENTRY_DSN || Sentry.getClient()) {
+    Sentry.captureException(error, {
+      extra: { type: 'uncaughtException' }
+    });
+  }
+  if (process.env.NODE_ENV === 'production') {
+    process.exit(1);
+  }
+};
+
+process.on('unhandledRejection', handleUnhandledRejection);
+process.on('uncaughtException', handleUncaughtException);
+
 // 🚨 CRITICAL: Exit immediately if JWT_SECRET is not configured
 if (!process.env.JWT_SECRET) {
   console.error("❌ JWT_SECRET is missing! Set it in .env file or Railway Environment Variables.");
@@ -21,7 +73,6 @@ import { initBackupService } from './services/backupService.js';
 import { initMpesaSyncCron } from './scripts/stkQueryCron.js';
 import { initStatusCron } from './services/statusCron.js';
 import { initHeroCron } from './services/heroCron.js';
-import './services/imageWorker.js';
 
 import routes from './routes/index.js';
 import settingRoutes from './routes/settingRoutes.js';
@@ -171,11 +222,27 @@ app.use('/api', routes);
 // Settings routes - mounted directly with /api/settings prefix
 app.use('/api/settings', settingRoutes);
 
-// Global Error Handler (Must be the last middleware)
-app.use((err, req, res, next) => {
-  console.error('🔥 CRITICAL ERROR:', err.stack);
+// Sentry Express error handler (instruments Express errors before custom handler)
+Sentry.setupExpressErrorHandler(app);
+
+// Global Error Handler (Must be after Sentry setup and routes)
+export const sentryErrorHandler = (err, req, res, next) => {
+  console.error('🔥 CRITICAL ERROR:', err.stack || err);
   
-  const statusCode = err.statusCode || 500;
+  const statusCode = err.statusCode || err.status || 500;
+
+  // Report critical errors (HTTP 5xx or unhandled server errors) to Sentry before responding
+  if (statusCode >= 500 && (process.env.SENTRY_DSN || Sentry.getClient())) {
+    Sentry.captureException(err, {
+      extra: {
+        path: req.originalUrl || req.url,
+        method: req.method,
+        statusCode,
+        ip: req.ip || req.headers?.['x-forwarded-for'],
+      }
+    });
+  }
+
   const message = process.env.NODE_ENV === 'production' 
     ? 'Something went wrong on our end. We are looking into it.' 
     : err.message;
@@ -184,7 +251,9 @@ app.use((err, req, res, next) => {
     success: false,
     message: message
   });
-});
+};
+
+app.use(sentryErrorHandler);
 
 // 404 handler
 app.use((req, res) => {
@@ -214,22 +283,29 @@ const startServer = async () => {
     
     // Start Hero Media Expiry Cron Job
     initHeroCron();
+
+    // Start background image worker
+    await import('./services/imageWorker.js');
+
     // Start listening
-    app.listen(PORT, () => {
+    const serverInstance = app.listen(PORT, () => {
       const isProduction = process.env.NODE_ENV === 'production';
       console.log(`🚀 Server running on port ${PORT}`);
       console.log(`📍 Environment: ${process.env.NODE_ENV}`);
       console.log(`✅ API URL: ${isProduction ? 'https://api.seekonapparelglobal.com' : 'http://localhost:' + PORT}`);
     });
-    
+    return serverInstance;
   } catch (error) {
     console.error('❌ Failed to start server:', error.message);
     process.exit(1);
   }
 };
 
-// Start the server
-startServer();
+// Start the server (skip when running in automated test mode to allow custom runners)
+if (process.env.NODE_ENV !== 'test') {
+  startServer();
+}
 
+export { app, startServer };
 export default app;
 

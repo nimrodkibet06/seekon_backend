@@ -178,7 +178,7 @@ export const createProduct = async (req, res) => {
       await SystemLog.create({
         action: 'product_created',
         actor: req.user?.email || 'system',
-        actorType: 'admin',
+        actorType: req.user?.role === 'cashier' ? 'cashier' : 'admin',
         details: { productId: product._id },
         module: 'product'
       });
@@ -248,7 +248,7 @@ export const updateProduct = async (req, res) => {
       await SystemLog.create({
         action: 'product_updated',
         actor: req.user?.email || 'system',
-        actorType: 'admin',
+        actorType: req.user?.role === 'cashier' ? 'cashier' : 'admin',
         details: { productId: product._id },
         module: 'product'
       });
@@ -330,7 +330,7 @@ export const deleteProduct = async (req, res) => {
       await SystemLog.create({
         action: 'product_deleted',
         actor: req.user?.email || 'system',
-        actorType: 'admin',
+        actorType: req.user?.role === 'cashier' ? 'cashier' : 'admin',
         details: { productId: req.params.id, deletedImages: imageUrls.length },
         module: 'product'
       });
@@ -572,7 +572,7 @@ export const migrateCategoryTypo = async (req, res) => {
       await SystemLog.create({
         action: 'category_typo_migration',
         actor: req.user?.email || 'system',
-        actorType: 'admin',
+        actorType: req.user?.role === 'cashier' ? 'cashier' : 'admin',
         details: { 
           migratedCount: result.modifiedCount,
           oldCategories: typoVariants,

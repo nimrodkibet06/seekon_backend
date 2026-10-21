@@ -12,7 +12,9 @@
     "create-admin": "node --expose-gc src/scripts/createAdmin.js",
     "clean-test-data": "node --expose-gc src/scripts/cleanTestData.js",
     "seed:smart": "node --expose-gc SmartSeed.js",
-    "seed:stock": "node --expose-gc updateStock.js"
+    "seed:stock": "node --expose-gc updateStock.js",
+    "test:mpesa-spoofing": "node src/scripts/verifyMpesaIpSpoofing.js",
+    "test:sentry": "node src/scripts/verifySentryObservability.js"
   },
   "keywords": [
     "seekon",
@@ -24,11 +26,13 @@
   "license": "ISC",
   "dependencies": {
     "@imgly/background-removal-node": "^1.4.5",
+    "@sentry/node": "^11.4.0",
     "@whiskeysockets/baileys": "^7.0.0-rc13",
     "axios": "^1.6.2",
     "bcrypt": "^5.1.1",
     "bcryptjs": "^3.0.3",
     "bullmq": "^5.78.1",
+    "bwip-js": "^3.5.0",
     "cloudinary": "^2.9.0",
     "cors": "^2.8.5",
     "disposable-email-blocklist": "^0.0.1",
@@ -47,6 +51,7 @@
     "multer-storage-cloudinary": "^4.0.0",
     "node-cron": "^4.2.1",
     "nodemailer": "^9.0.3",
+    "pdfkit": "^0.15.0",
     "pino": "^10.3.1",
     "qrcode-terminal": "^0.12.0",
     "resend": "^6.9.1",
@@ -57,8 +62,17 @@
     "nodemon": "^3.0.2"
   },
   "overrides": {
-    "lodash": "^4.18.1",
+    "lodash": "^4.17.21",
     "tar": "^7.5.19",
     "zod": "^3.23.8"
+  },
+  "allowScripts": {
+    "sharp@0.35.1": true,
+    "sharp@0.32.6": true,
+    "bcrypt@5.1.1": true,
+    "msgpackr-extract@3.0.4": true,
+    "onnxruntime-node@1.17.3": true,
+    "protobufjs@7.6.5": true,
+    "@whiskeysockets/baileys@7.0.0-rc13": true
   }
 }

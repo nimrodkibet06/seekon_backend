@@ -38,6 +38,8 @@ import StatusTask  from '../models/StatusTask.js';
 import Setting from '../models/Setting.js';
 import HeroHistory from '../models/HeroHistory.js';
 import { normalizePhone } from '../utils/phoneFormatter.js';
+import PendingOrder from '../models/PendingOrder.js';
+import { isOrderMessage, parseWhatsAppOrderText } from '../services/whatsappOrderParser.js';
 import User from '../models/User.js';
 import Admin from '../models/Admin.js';
 import { getGroqClient } from '../utils/groqProvider.js';
@@ -2041,6 +2043,86 @@ const handleAdminPanelUpsert = async (messages) => {
 // ─────────────────────────────────────────────────────────────────────────────
 // STEP 2 + CORE — initWhatsAppClient: creates the Baileys WASocket
 // ─────────────────────────────────────────────────────────────────────────────
+// ─────────────────────────────────────────────────────────────────────────────
+// Headless WhatsApp Order Pool — Command Center Listener
+// ─────────────────────────────────────────────────────────────────────────────
+const commandCenterGroupJid = normalizeJid(
+  process.env.COMMAND_CENTER_GROUP_JID ||
+  process.env.ADMIN_GROUP_JID ||
+  process.env.ADMIN_WHATSAPP_GROUP_ID ||
+  ''
+);
+
+const handleCommandCenterOrderUpsert = async (messages) => {
+  for (const msg of messages) {
+    try {
+      const remoteJid = msg.key?.remoteJid || '';
+      if (!remoteJid) continue;
+
+      const isTargetGroup = (commandCenterGroupJid && remoteJid === commandCenterGroupJid) ||
+                            (adminGroupJid && remoteJid === adminGroupJid);
+
+      const isDM = remoteJid.endsWith('@s.whatsapp.net');
+      if (!isTargetGroup && !isDM) continue;
+
+      const text = (
+        msg.message?.conversation ||
+        msg.message?.extendedTextMessage?.text ||
+        msg.message?.imageMessage?.caption ||
+        ''
+      ).trim();
+
+      if (!text || !isOrderMessage(text)) continue;
+
+      if (msg.key?.id && sentMessageIds.has(msg.key.id)) continue;
+
+      console.log('📦 [POS-QUEUE]: Manual order detected in Command Center! Parsing...');
+      const parsed = await parseWhatsAppOrderText(text);
+
+      if (!parsed.customerPhone) {
+        console.warn('⚠️ [POS-QUEUE]: Order dropped without recognizable customer phone number.');
+        continue;
+      }
+
+      const existing = await PendingOrder.findOne({
+        customerPhone: parsed.customerPhone,
+        totalAmount: parsed.totalAmount,
+        status: 'pending',
+        createdAt: { $gte: new Date(Date.now() - 5 * 60 * 1000) }
+      });
+
+      if (existing) {
+        console.log('ℹ️ [POS-QUEUE]: Duplicate pending order ignored for:', parsed.customerPhone);
+        continue;
+      }
+
+      const pendingOrder = await PendingOrder.create({
+        ...parsed,
+        rawMessage: text,
+        senderJid: msg.key?.participant || remoteJid,
+        groupJid: remoteJid
+      });
+
+      console.log(`✅ [POS-QUEUE]: Successfully queued PendingOrder #${pendingOrder._id} for ${parsed.customerPhone} (KES ${parsed.totalAmount})`);
+
+      try {
+        await sock.sendMessage(remoteJid, {
+          text: `✅ *[Seekon POS Queue]*: Order logged into cashier terminal!\n` +
+                `• *Customer:* ${parsed.customerName} (+${parsed.customerPhone})\n` +
+                `• *Items:* ${parsed.items.length} item(s)\n` +
+                `• *Total:* KES ${parsed.totalAmount.toLocaleString()}\n` +
+                `• *Queue ID:* \`${pendingOrder._id}\`\n\n` +
+                `_Cashier can now confirm and complete sale on the POS dashboard._`
+        });
+      } catch (ackError) {
+        console.error('Failed to send queue acknowledgement:', ackError.message);
+      }
+    } catch (err) {
+      console.error('Error handling command center order upsert:', err);
+    }
+  }
+};
+
 export const initWhatsAppClient = async () => {
   console.log('📦 [WA]: Initializing Baileys WASocket (Chromium-free)...');
 
@@ -2181,6 +2263,12 @@ export const initWhatsAppClient = async () => {
   sock.ev.on('messages.upsert', async ({ messages: msgs, type }) => {
     if (type !== 'notify') return;
     await handleBuyerGroupGhostMode(msgs);
+  });
+
+  // ── Headless WhatsApp Order Pool — Command Center Group Listener ─────────
+  sock.ev.on('messages.upsert', async ({ messages: msgs, type }) => {
+    if (type !== 'notify') return;
+    await handleCommandCenterOrderUpsert(msgs);
   });
 
   console.log('✅ [WA]: Baileys socket initialized. All event listeners active.');
@@ -2474,3 +2562,36 @@ const whatsappClient = {
 };
 
 export default whatsappClient;
+
+/**
+ * Dispatches an in-memory PDF e-receipt buffer to a customer's WhatsApp as a document.
+ */
+export const sendWhatsAppReceipt = async (phone, pdfBuffer, orderId, totalAmount) => {
+  const cleanPhone = normalizePhone(phone);
+  if (!cleanPhone) throw new Error('Valid customer phone number required for WhatsApp receipt');
+  const jid = `${cleanPhone}@s.whatsapp.net`;
+
+  if (!sock || !isConnected) {
+    console.warn(`⚠️ [POS-RECEIPT]: WhatsApp bot is offline. Skipping instant delivery to +${cleanPhone}`);
+    return { success: false, message: 'WhatsApp bot offline' };
+  }
+
+  const fileName = `Seekon-Receipt-${String(orderId).slice(-6).toUpperCase()}.pdf`;
+  const caption = `🛍️ *Thank you for shopping with Seekon Apparel!*\n\n` +
+                  `Here is your official e-receipt for Order #SKN-${String(orderId).slice(-6).toUpperCase()}.\n` +
+                  `• *Amount Paid:* KES ${Number(totalAmount).toLocaleString()}\n` +
+                  `• *Date:* ${new Date().toLocaleDateString('en-KE')}\n\n` +
+                  `_Keep this PDF receipt for any returns or exchanges within 7 days._\n` +
+                  `📍 Thika Rd Kahawa Sukari • Kilimani • Runda Mall • Ngong Rd\n` +
+                  `📞 +254 727 672 772 • seekonapparel.com`;
+
+  const result = await sock.sendMessage(jid, {
+    document: pdfBuffer,
+    mimetype: 'application/pdf',
+    fileName,
+    caption
+  });
+
+  console.log(`📱 [POS-RECEIPT]: E-Receipt PDF dispatched successfully to +${cleanPhone}`);
+  return { success: true, messageId: result?.key?.id };
+};

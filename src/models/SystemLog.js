@@ -34,7 +34,7 @@ const systemLogSchema = new mongoose.Schema({
   },
   actorType: {
     type: String,
-    enum: ['user', 'admin', 'system'],
+    enum: ['user', 'cashier', 'admin', 'system'],
     default: 'user'
   },
   details: {

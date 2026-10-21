@@ -90,12 +90,18 @@ export const updateUserStatus = async (req, res) => {
     const updateData = {};
     if (status !== undefined) updateData.status = status;
     if (role !== undefined) {
+      if (!['user', 'cashier', 'admin'].includes(role)) {
+        return res.status(400).json({
+          success: false,
+          message: 'Invalid role. Must be "user", "cashier", or "admin"'
+        });
+      }
       updateData.role = role;
       updateData.isAdmin = (role === 'admin');
     }
 
     // Check if trying to remove admin role
-    if (role === 'user') {
+    if (role === 'user' || role === 'cashier') {
       // Count total admins before this update
       const adminCount = await User.countDocuments({ role: 'admin' });
       const targetUser = await User.findById(id);

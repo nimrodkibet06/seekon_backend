@@ -33,7 +33,8 @@ const OPTIONAL_VARS = [
   { key: 'RESEND_API_KEY', name: 'Resend API Key', description: 'API key for Resend email service' },
   { key: 'GEMINI_API_KEY', name: 'Gemini AI API Key', description: 'API key for Seekon AI Shopping Assistant' },
   { key: 'GOOGLE_DRIVE_CREDENTIALS', name: 'Google Drive Credentials', description: 'Service account JSON for Drive backups' },
-  { key: 'GOOGLE_DRIVE_FOLDER_ID', name: 'Google Drive Folder ID', description: 'Target folder for backup JSON files' }
+  { key: 'GOOGLE_DRIVE_FOLDER_ID', name: 'Google Drive Folder ID', description: 'Target folder for backup JSON files' },
+  { key: 'SENTRY_DSN', name: 'Sentry DSN', description: 'Observability & error tracking (Layer 12)' }
 ];
 
 /**
@@ -104,7 +105,8 @@ export const isServiceConfigured = (serviceName) => {
     googleDrive: ['GOOGLE_DRIVE_CREDENTIALS', 'GOOGLE_DRIVE_FOLDER_ID'],
     mongodb: ['MONGO_URI'],
     jwt: ['JWT_SECRET'],
-    gemini: ['GEMINI_API_KEY']
+    gemini: ['GEMINI_API_KEY'],
+    sentry: ['SENTRY_DSN']
   };
   
   const keys = serviceKeys[serviceName];

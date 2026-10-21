@@ -14,6 +14,7 @@ import brandRoutes from './brandRoutes.js';
 import categoryRoutes from './categoryRoutes.js';
 import toolRoutes from './toolRoutes.js';
 import statusRoutes from './statusRoutes.js';
+import posRoutes from './posRoutes.js';
 
 const router = express.Router();
 
@@ -33,5 +34,6 @@ router.use('/brands', brandRoutes);
 router.use('/categories', categoryRoutes);
 router.use('/tools', toolRoutes);
 router.use('/status', statusRoutes);
+router.use('/pos', posRoutes);
 
 export default router;

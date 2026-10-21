@@ -12,7 +12,7 @@ import {
   getProcessingUploads,
   generateDescription
 } from '../controllers/productController.js';
-import { authMiddleware, adminMiddleware } from '../middleware/auth.js';
+import { authMiddleware, adminMiddleware, authorizeRoles } from '../middleware/auth.js';
 import { uploadQueueMultiple } from '../middleware/queueUpload.js';
 
 const router = express.Router();
@@ -31,9 +31,9 @@ router.post('/:id/reviews', authMiddleware, addReview);
 router.get('/:id/can-review', authMiddleware, canUserReview);
 
 // Admin Routes (Only for creating/editing) - Protected and Admin only
-router.post('/', authMiddleware, adminMiddleware, uploadQueueMultiple, createProduct);
-router.post('/generate-description', authMiddleware, adminMiddleware, generateDescription);
-router.put('/:id', authMiddleware, adminMiddleware, updateProduct);
+router.post('/', authMiddleware, authorizeRoles('admin', 'cashier'), uploadQueueMultiple, createProduct);
+router.post('/generate-description', authMiddleware, authorizeRoles('admin', 'cashier'), generateDescription);
+router.put('/:id', authMiddleware, authorizeRoles('admin', 'cashier'), updateProduct);
 router.delete('/:id', authMiddleware, adminMiddleware, deleteProduct);
 
 // Migration Routes (Admin only)

@@ -70,4 +70,30 @@ const admin = (req, res, next) => {
   }
 };
 
-export { protect, admin };
+const authorizeRoles = (...roles) => {
+  return (req, res, next) => {
+    if (!req.user) {
+      return res.status(401).json({
+        success: false,
+        message: 'Not authorized, no user context'
+      });
+    }
+
+    const userRole = req.user.role || (req.user.isAdmin ? 'admin' : 'user');
+
+    if (userRole === 'superadmin' && roles.includes('admin')) {
+      return next();
+    }
+
+    if (!roles.includes(userRole)) {
+      return res.status(403).json({
+        success: false,
+        message: `Access denied. Role '${userRole}' is not authorized to access this route.`
+      });
+    }
+
+    next();
+  };
+};
+
+export { protect, admin, authorizeRoles };

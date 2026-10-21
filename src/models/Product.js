@@ -48,6 +48,16 @@ const productSchema = new mongoose.Schema({
     type: String,
     required: true
   },
+  sku: {
+    type: String,
+    trim: true,
+    sparse: true
+  },
+  barcode: {
+    type: String,
+    trim: true,
+    sparse: true
+  },
   sizes: [{
     type: String
   }],
