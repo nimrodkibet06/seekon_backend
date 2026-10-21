@@ -39,7 +39,6 @@ import Setting from '../models/Setting.js';
 import HeroHistory from '../models/HeroHistory.js';
 import { normalizePhone } from '../utils/phoneFormatter.js';
 import Order from '../models/Order.js';
-import Product from '../models/Product.js';
 import PendingOrder from '../models/PendingOrder.js';
 import { generateReceiptPDF } from '../services/receiptService.js';
 import { isOrderMessage, parseWhatsAppOrderText } from '../services/whatsappOrderParser.js';
@@ -2051,6 +2050,17 @@ const handleAdminPanelUpsert = async (messages) => {
 // ─────────────────────────────────────────────────────────────────────────────
 const normalizeJid = (jid = '') => String(jid || '').replace(/['"]/g, '').trim();
 
+// Target Group for POS Interception & Orders
+// Priority: POS_INTERCEPTION_GROUP_JID -> SEEKON_COMMAND_CENTER_JID -> COMMAND_CENTER_GROUP_JID -> ADMIN_GROUP_JID -> ADMIN_WHATSAPP_GROUP_ID
+const posInterceptionGroupJid = normalizeJid(
+  process.env.POS_INTERCEPTION_GROUP_JID ||
+  process.env.SEEKON_COMMAND_CENTER_JID ||
+  process.env.COMMAND_CENTER_GROUP_JID ||
+  process.env.ADMIN_GROUP_JID ||
+  process.env.ADMIN_WHATSAPP_GROUP_ID ||
+  ''
+);
+
 const commandCenterGroupJid = normalizeJid(
   process.env.COMMAND_CENTER_GROUP_JID ||
   process.env.ADMIN_GROUP_JID ||
@@ -2064,11 +2074,13 @@ const handleCommandCenterOrderUpsert = async (messages) => {
       const remoteJid = msg.key?.remoteJid || '';
       if (!remoteJid) continue;
 
-      const isTargetGroup = (commandCenterGroupJid && remoteJid === commandCenterGroupJid) ||
+      // Strictly listen to the designated group (POS_INTERCEPTION_GROUP_JID or fallback to Command Center / Admin group).
+      // Normal customer DMs to the bot are explicitly ignored here.
+      const isTargetGroup = (posInterceptionGroupJid && remoteJid === posInterceptionGroupJid) ||
+                            (commandCenterGroupJid && remoteJid === commandCenterGroupJid) ||
                             (adminGroupJid && remoteJid === adminGroupJid);
 
-      const isDM = remoteJid.endsWith('@s.whatsapp.net');
-      if (!isTargetGroup && !isDM) continue;
+      if (!isTargetGroup) continue;
 
       const text = (
         msg.message?.conversation ||
