@@ -2568,7 +2568,7 @@ export default whatsappClient;
 /**
  * Dispatches an in-memory PDF e-receipt buffer to a customer's WhatsApp as a document.
  */
-export const sendWhatsAppReceipt = async (phone, pdfBuffer, orderId, totalAmount) => {
+export const sendWhatsAppReceipt = async (phone, pdfBuffer, orderId, totalAmount, options = {}) => {
   const cleanPhone = normalizePhone(phone);
   if (!cleanPhone) throw new Error('Valid customer phone number required for WhatsApp receipt');
   const jid = `${cleanPhone}@s.whatsapp.net`;
@@ -2578,14 +2578,45 @@ export const sendWhatsAppReceipt = async (phone, pdfBuffer, orderId, totalAmount
     return { success: false, message: 'WhatsApp bot offline' };
   }
 
-  const fileName = `Seekon-Receipt-${String(orderId).slice(-6).toUpperCase()}.pdf`;
-  const caption = `🛍️ *Thank you for shopping with Seekon Apparel!*\n\n` +
-                  `Here is your official e-receipt for Order #SKN-${String(orderId).slice(-6).toUpperCase()}.\n` +
-                  `• *Amount Paid:* KES ${Number(totalAmount).toLocaleString()}\n` +
-                  `• *Date:* ${new Date().toLocaleDateString('en-KE')}\n\n` +
-                  `_Keep this PDF receipt for any returns or exchanges within 7 days._\n` +
-                  `📍 Thika Rd Kahawa Sukari • Kilimani • Runda Mall • Ngong Rd\n` +
-                  `📞 +254 727 672 772 • seekonapparel.com`;
+  const isDispatchSlip = options.isDispatchSlip || 
+                         options.paymentStatus === 'pending_pod' || 
+                         options.paymentStatus === 'partial_deposit';
+
+  const orderRef = String(orderId).slice(-6).toUpperCase();
+  const fileName = isDispatchSlip 
+    ? `Seekon-Dispatch-Slip-${orderRef}.pdf`
+    : `Seekon-Receipt-${orderRef}.pdf`;
+
+  let caption = '';
+  if (isDispatchSlip) {
+    const balanceDue = Number(options.balanceDue ?? totalAmount);
+    const depositPaid = Number(options.amountPaid ?? 0);
+    const platform = options.socialPlatform && options.socialPlatform !== 'none' 
+      ? ` (${options.socialPlatform.toUpperCase()})` 
+      : '';
+    const location = options.location ? `• *Delivery Location:* ${options.location}\n` : '';
+    const custName = options.customerName ? `Hi ${options.customerName}! ` : '';
+
+    caption = `📦 *Seekon Apparel — Order Confirmation & Dispatch Slip*\n\n` +
+              `${custName}Your social delivery order *#SKN-${orderRef}*${platform} has been logged and queued for courier dispatch.\n\n` +
+              `• *Total Order Value:* KES ${Number(totalAmount).toLocaleString()}\n` +
+              (depositPaid > 0 ? `• *Deposit Paid Now:* KES ${depositPaid.toLocaleString()}\n` : '') +
+              `• *BALANCE TO PAY ON DELIVERY:* *KES ${balanceDue.toLocaleString()}*\n` +
+              location +
+              `\n` +
+              `⚠️ *Action Required:* Please open the attached slip and *confirm that your items, sizes, and delivery location are 100% accurate* so our dispatch rider can proceed.\n\n` +
+              `📍 Thika Rd Kahawa Sukari • Kilimani • Runda Mall • Ngong Rd\n` +
+              `📞 +254 727 672 772 • seekonapparel.com`;
+  } else {
+    caption = `🛍️ *Thank you for shopping with Seekon Apparel!*\n\n` +
+              `Here is your official e-receipt for Order #SKN-${orderRef}.\n` +
+              `• *Total Amount Paid:* KES ${Number(totalAmount).toLocaleString()}\n` +
+              `• *Balance Due:* KES 0 (PAID)\n` +
+              `• *Date:* ${new Date().toLocaleDateString('en-KE')}\n\n` +
+              `_Keep this PDF receipt for any returns or exchanges within 7 days._\n` +
+              `📍 Thika Rd Kahawa Sukari • Kilimani • Runda Mall • Ngong Rd\n` +
+              `📞 +254 727 672 772 • seekonapparel.com`;
+  }
 
   const result = await sock.sendMessage(jid, {
     document: pdfBuffer,
@@ -2594,6 +2625,6 @@ export const sendWhatsAppReceipt = async (phone, pdfBuffer, orderId, totalAmount
     caption
   });
 
-  console.log(`📱 [POS-RECEIPT]: E-Receipt PDF dispatched successfully to +${cleanPhone}`);
+  console.log(`📱 [POS-RECEIPT]: ${isDispatchSlip ? 'Dispatch Slip' : 'E-Receipt'} PDF dispatched successfully to +${cleanPhone}`);
   return { success: true, messageId: result?.key?.id };
 };

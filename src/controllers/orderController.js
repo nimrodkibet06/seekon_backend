@@ -505,7 +505,11 @@ export const updateOrderStatus = async (req, res) => {
     const updateData = {};
     if (newStatus) updateData.status = newStatus;
     if (expectedArrival !== undefined) updateData.expectedArrival = expectedArrival;
-    if (deliveryDetails !== undefined) updateData.deliveryDetails = deliveryDetails;
+    if (deliveryDetails !== undefined) {
+      updateData.deliveryDetails = typeof deliveryDetails === 'string'
+        ? { riderNotes: deliveryDetails }
+        : deliveryDetails;
+    }
 
     const order = await Order.findByIdAndUpdate(
       req.params.id,
@@ -563,10 +567,14 @@ export const updateOrderStatus = async (req, res) => {
         updateDetails += `• *Expected Arrival:* ${order.expectedArrival}\n`;
       }
       
-      if (deliveryDetails) {
-        updateDetails += `• *Courier Info / Note:* ${deliveryDetails}\n`;
-      } else if (order.deliveryDetails) {
-        updateDetails += `• *Courier Info / Note:* ${order.deliveryDetails}\n`;
+            const formatDeliveryInfo = (d) => {
+        if (!d) return '';
+        if (typeof d === 'string') return d;
+        return [d.location, d.riderNotes].filter(Boolean).join(' • ');
+      };
+      const deliveryInfoStr = formatDeliveryInfo(deliveryDetails || order.deliveryDetails);
+      if (deliveryInfoStr) {
+        updateDetails += `• *Courier Info / Note:* ${deliveryInfoStr}\n`;
       }
 
       const customerMsg = `🚚 *SEEKON ORDER UPDATE* 🚚

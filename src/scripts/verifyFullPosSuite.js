@@ -106,7 +106,6 @@ async function runTestSuite() {
   assert(Buffer.isBuffer(barcodeSheetBuffer), 'A4 barcode sheet rendered to Buffer');
   assert(barcodeSheetBuffer.length > 5000, `A4 PDF contains valid content (Length: ${barcodeSheetBuffer.length} bytes)`);
 
-  // Verify PDF header magic bytes '%PDF-'
   const pdfHeader = barcodeSheetBuffer.slice(0, 5).toString('ascii');
   assert(pdfHeader === '%PDF-', 'Barcode document begins with valid PDF signature (%PDF-)');
 
@@ -168,6 +167,92 @@ Notes: Walk-in collection at Kilimani`;
   });
   const pendingErrors = pendingDoc.validateSync()?.errors;
   assert(!pendingErrors, 'PendingOrder model schema successfully validates queued WhatsApp order');
+
+  // ----------------------------------------------------
+  // PHASE 6: Social Media POD & Dual-Mode Dispatch Slip
+  // ----------------------------------------------------
+  console.log('\n--- [Phase 6] Social Media POD & Dispatch Slip Verification ---');
+
+  // Test 1: Full Pay-On-Delivery Order (Zero Deposit)
+  const podOrder = new Order({
+    _id: new mongoose.Types.ObjectId(),
+    orderType: 'social-delivery',
+    socialPlatform: 'instagram',
+    paymentStatus: 'pending_pod',
+    items: [
+      { product: new mongoose.Types.ObjectId(), name: 'Seekon Tech Fleece', price: 4500, quantity: 1, size: 'XL', color: 'Midnight Navy' }
+    ],
+    shippingPrice: 300,
+    totalAmount: 4800,
+    amountPaid: 0,
+    balanceDue: 4800,
+    deliveryDetails: {
+      customerName: 'Amina Wangari',
+      customerPhone: '254711223344',
+      location: 'Kilimani, Wood Avenue Apt 4B',
+      deliveryFee: 300,
+      riderNotes: 'Call before arriving, security gate #2'
+    },
+    cashier: cashier._id
+  });
+
+  const podErrors = podOrder.validateSync()?.errors;
+  assert(!podErrors, 'Order schema validates Social POD order with delivery details & balanceDue');
+  assert(podOrder.orderType === 'social-delivery', 'Order identifies as "social-delivery"');
+  assert(podOrder.socialPlatform === 'instagram', 'Order records social platform "instagram"');
+  assert(podOrder.paymentStatus === 'pending_pod', 'Order records paymentStatus "pending_pod"');
+  assert(podOrder.balanceDue === 4800, 'Order calculates full balanceDue on delivery');
+
+  // Test 2: Partial Deposit Order (e.g. Delivery fee paid upfront via M-Pesa)
+  const depositOrder = new Order({
+    _id: new mongoose.Types.ObjectId(),
+    orderType: 'social-delivery',
+    socialPlatform: 'tiktok',
+    paymentStatus: 'partial_deposit',
+    items: [
+      { product: new mongoose.Types.ObjectId(), name: 'Seekon Cargo Pants', price: 3500, quantity: 2, size: '32', color: 'Khaki' }
+    ],
+    shippingPrice: 350,
+    totalAmount: 7350,
+    amountPaid: 350,
+    balanceDue: 7000,
+    payments: { cash: 0, mpesa: 350 },
+    deliveryDetails: {
+      customerName: 'Brian Otieno',
+      customerPhone: '254722334455',
+      location: 'Westlands, Mpaka Road',
+      deliveryFee: 350,
+      riderNotes: 'Leave with reception if not answering'
+    },
+    cashier: cashier._id
+  });
+
+  const depositErrors = depositOrder.validateSync()?.errors;
+  assert(!depositErrors, 'Order schema validates partial deposit order with balanceDue');
+  assert(depositOrder.paymentStatus === 'partial_deposit', 'Order records paymentStatus "partial_deposit"');
+  assert(depositOrder.amountPaid === 350 && depositOrder.balanceDue === 7000, 'Accurate deposit and balance due calculation');
+
+  // Test 3: Generate Dual-Mode Dispatch Slip PDF
+  const dispatchSlipBuffer = await generateReceiptPDF(podOrder, {
+    cashierName: 'Jane Cashier'
+  });
+
+  assert(Buffer.isBuffer(dispatchSlipBuffer), 'Dispatch slip rendered to in-memory Buffer');
+  assert(dispatchSlipBuffer.slice(0, 5).toString('ascii') === '%PDF-', 'Dispatch slip has valid PDF signature (%PDF-)');
+  assert(dispatchSlipBuffer.length > 2000, `Dispatch slip contains detailed delivery layout (Length: ${dispatchSlipBuffer.length} bytes)`);
+
+  // Test 4: Generate Reconciled Paid E-Receipt PDF
+  depositOrder.paymentStatus = 'paid';
+  depositOrder.amountPaid = 7350;
+  depositOrder.balanceDue = 0;
+  depositOrder.payments.mpesa = 7350;
+
+  const paidReceiptBuffer = await generateReceiptPDF(depositOrder, {
+    cashierName: 'Jane Cashier'
+  });
+
+  assert(Buffer.isBuffer(paidReceiptBuffer), 'Final reconciled paid receipt rendered to Buffer');
+  assert(paidReceiptBuffer.slice(0, 5).toString('ascii') === '%PDF-', 'Paid receipt has valid PDF signature (%PDF-)');
 
   // ----------------------------------------------------
   // SUMMARY SCORECARD

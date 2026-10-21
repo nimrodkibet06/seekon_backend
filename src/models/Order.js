@@ -68,6 +68,29 @@ const orderSchema = new mongoose.Schema({
     enum: ['online', 'pos', 'whatsapp'],
     default: 'online'
   },
+  orderType: {
+    type: String,
+    enum: ['walk-in', 'social-delivery'],
+    default: 'walk-in'
+  },
+  socialPlatform: {
+    type: String,
+    enum: ['none', 'instagram', 'whatsapp', 'tiktok'],
+    default: 'none'
+  },
+  paymentStatus: {
+    type: String,
+    enum: ['paid', 'pending_pod', 'partial_deposit', 'cancelled'],
+    default: 'paid'
+  },
+  amountPaid: {
+    type: Number,
+    default: 0
+  },
+  balanceDue: {
+    type: Number,
+    default: 0
+  },
   cashier: {
     type: mongoose.Schema.Types.ObjectId,
     ref: 'User',
@@ -123,7 +146,11 @@ const orderSchema = new mongoose.Schema({
     type: String
   },
   deliveryDetails: {
-    type: String
+    customerName: { type: String, default: '' },
+    customerPhone: { type: String, default: '' },
+    location: { type: String, default: '' },
+    deliveryFee: { type: Number, default: 0 },
+    riderNotes: { type: String, default: '' }
   },
   hiddenByUser: {
     type: Boolean,

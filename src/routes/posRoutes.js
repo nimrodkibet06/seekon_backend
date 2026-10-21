@@ -8,7 +8,10 @@ import {
   checkoutPOSSale,
   getPendingWhatsAppOrders,
   dismissPendingOrder,
-  getOrderReceiptPDF
+  getOrderReceiptPDF,
+  getPendingDeliveries,
+  completeDeliveryPayment,
+  cancelDeliveryAndRestock
 } from '../controllers/posController.js';
 
 const router = express.Router();
@@ -47,21 +50,39 @@ router.get('/customers/lookup', lookupCustomerByPhone);
 
 /**
  * @route   GET /api/pos/barcodes/product/:id
- * @desc    Generate printable A4 grid of Code 128 barcode stickers for a product
+ * @desc    Generate printable A4 grid of Code 128 barcode stickers for a product (Download)
  */
 router.get('/barcodes/product/:id', generateProductBarcodeSheet);
 
 /**
  * @route   GET /api/pos/barcodes/category/:category
- * @desc    Generate printable A4 grid of Code 128 barcode stickers for a category
+ * @desc    Generate printable A4 grid of Code 128 barcode stickers for a category (Download)
  */
 router.get('/barcodes/category/:category', generateCategoryBarcodeSheet);
 
 /**
  * @route   POST /api/pos/checkout
- * @desc    Execute walk-in sale: deduct stock, save order, generate PDF receipt, WhatsApp delivery
+ * @desc    Execute sale (walk-in or social POD): deduct stock, save order, generate PDF, WhatsApp delivery
  */
 router.post('/checkout', checkoutPOSSale);
+
+/**
+ * @route   GET /api/pos/deliveries
+ * @desc    Fetch active social media / POD orders awaiting delivery & reconciliation
+ */
+router.get('/deliveries', getPendingDeliveries);
+
+/**
+ * @route   POST /api/pos/orders/:id/complete-payment
+ * @desc    Reconcile delivery order: complete payment, mark paid, dispatch official receipt
+ */
+router.post('/orders/:id/complete-payment', completeDeliveryPayment);
+
+/**
+ * @route   POST /api/pos/orders/:id/cancel-delivery
+ * @desc    Cancel a delivery order & automatically restock inventory via $inc
+ */
+router.post('/orders/:id/cancel-delivery', cancelDeliveryAndRestock);
 
 /**
  * @route   GET /api/pos/orders/pending

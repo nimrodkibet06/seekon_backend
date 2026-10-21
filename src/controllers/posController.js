@@ -15,7 +15,6 @@ import { normalizePhone } from '../utils/phoneFormatter.js';
 export const searchProductsForPOS = async (req, res) => {
   try {
     const { q = '', limit = 1000, category = '', inStock } = req.query;
-    // Don't exclude active inventory - pull full product catalog
     const query = { status: { $ne: 'inactive' } };
 
     if (q && q.trim()) {
@@ -47,7 +46,6 @@ export const searchProductsForPOS = async (req, res) => {
       .limit(maxLimit)
       .lean();
 
-    // Ensure barcode is populated on every returned product
     const enhancedProducts = products.map(prod => ({
       ...prod,
       image: prod.image || prod.images?.[0] || '',
@@ -119,7 +117,7 @@ export const lookupCustomerByPhone = async (req, res) => {
 
 /**
  * @route   GET /api/pos/barcodes/product/:id
- * @desc    Generate printable A4 grid of Code 128 barcode stickers for a product
+ * @desc    Generate printable A4 grid of Code 128 barcode stickers for a product (Direct Download)
  * @access  Private (Admin, Cashier)
  */
 export const generateProductBarcodeSheet = async (req, res) => {
@@ -150,7 +148,8 @@ export const generateProductBarcodeSheet = async (req, res) => {
 
     const safeFilename = product.name.replace(/[^a-zA-Z0-9_-]/g, '_');
     res.setHeader('Content-Type', 'application/pdf');
-    res.setHeader('Content-Disposition', `inline; filename="Barcode-${safeFilename}.pdf"`);
+    // Direct download attachment instead of opening inline print dialog
+    res.setHeader('Content-Disposition', `attachment; filename="Barcode-${safeFilename}.pdf"`);
     res.setHeader('Content-Length', pdfBuffer.length);
 
     res.end(pdfBuffer);
@@ -165,7 +164,7 @@ export const generateProductBarcodeSheet = async (req, res) => {
 
 /**
  * @route   GET /api/pos/barcodes/category/:category
- * @desc    Generate printable A4 grid of Code 128 barcode stickers for a category
+ * @desc    Generate printable A4 grid of Code 128 barcode stickers for a category (Direct Download)
  * @access  Private (Admin, Cashier)
  */
 export const generateCategoryBarcodeSheet = async (req, res) => {
@@ -193,8 +192,10 @@ export const generateCategoryBarcodeSheet = async (req, res) => {
       sheetSubtitle: `Category Collection (${items.length} Products)`
     });
 
+    const safeCategory = category.replace(/[^a-zA-Z0-9_-]/g, '_');
     res.setHeader('Content-Type', 'application/pdf');
-    res.setHeader('Content-Disposition', `inline; filename="Barcodes-${category}.pdf"`);
+    // Direct download attachment
+    res.setHeader('Content-Disposition', `attachment; filename="Barcodes-${safeCategory}.pdf"`);
     res.setHeader('Content-Length', pdfBuffer.length);
 
     res.end(pdfBuffer);
@@ -209,7 +210,7 @@ export const generateCategoryBarcodeSheet = async (req, res) => {
 
 /**
  * @route   POST /api/pos/checkout
- * @desc    Execute walk-in sale: atomically deduct stock, save order, generate PDF receipt, dispatch via WhatsApp
+ * @desc    Execute sale: atomically deduct stock, save order (walk-in or social POD), generate PDF, dispatch WhatsApp
  * @access  Private (Admin, Cashier)
  */
 export const checkoutPOSSale = async (req, res) => {
@@ -217,11 +218,16 @@ export const checkoutPOSSale = async (req, res) => {
     const {
       items = [],
       customerPhone = '',
-      customerName = 'Walk-in Customer',
+      customerName = '',
       payments = { cash: 0, mpesa: 0 },
       paymentMethod = 'Split',
       notes = '',
-      pendingOrderId = null
+      pendingOrderId = null,
+      sendWhatsAppReceipt: shouldSendReceipt = true,
+      // Social Media / Pay on Delivery (POD) fields
+      orderType = 'walk-in', // 'walk-in' | 'social-delivery'
+      socialPlatform = 'none', // 'none' | 'instagram' | 'whatsapp' | 'tiktok'
+      deliveryDetails = null
     } = req.body;
 
     if (!items || items.length === 0) {
@@ -231,8 +237,48 @@ export const checkoutPOSSale = async (req, res) => {
       });
     }
 
-    // 1. Validate Stock Availability & Calculate Total
-    let calculatedTotal = 0;
+    const isSocialDelivery = orderType === 'social-delivery';
+
+    // 1. Validate Delivery Details if social-delivery
+    let deliveryFee = 0;
+    let finalCustomerName = (customerName || '').trim();
+    let finalPhone = (customerPhone || '').trim();
+    let deliveryLocation = '';
+    let riderNotes = '';
+
+    if (isSocialDelivery) {
+      if (!deliveryDetails || !deliveryDetails.customerName?.trim()) {
+        return res.status(400).json({
+          success: false,
+          message: 'Customer Name is required for social delivery orders'
+        });
+      }
+      if (!deliveryDetails.customerPhone?.trim() && !customerPhone.trim()) {
+        return res.status(400).json({
+          success: false,
+          message: 'WhatsApp Phone Number is required for social delivery orders'
+        });
+      }
+      if (!deliveryDetails.location?.trim()) {
+        return res.status(400).json({
+          success: false,
+          message: 'Delivery Location / Address is required'
+        });
+      }
+
+      finalCustomerName = deliveryDetails.customerName.trim();
+      finalPhone = deliveryDetails.customerPhone ? deliveryDetails.customerPhone.trim() : customerPhone.trim();
+      deliveryLocation = deliveryDetails.location.trim();
+      deliveryFee = Math.max(0, Number(deliveryDetails.deliveryFee || 0));
+      riderNotes = (deliveryDetails.riderNotes || '').trim();
+    } else {
+      finalCustomerName = finalCustomerName || 'Walk-in Customer';
+    }
+
+    const cleanPhone = finalPhone ? normalizePhone(finalPhone) : '';
+
+    // 2. Validate Stock Availability & Calculate Items Subtotal
+    let itemsSubtotal = 0;
     const orderItems = [];
 
     for (const item of items) {
@@ -262,7 +308,7 @@ export const checkoutPOSSale = async (req, res) => {
       }
 
       const itemPrice = Number(item.price ?? product.price);
-      calculatedTotal += itemPrice * reqQty;
+      itemsSubtotal += itemPrice * reqQty;
 
       orderItems.push({
         product: product._id,
@@ -275,19 +321,43 @@ export const checkoutPOSSale = async (req, res) => {
       });
     }
 
-    // 2. Validate Payment Breakdown
+    // Grand Total including optional delivery fee
+    const grandTotal = itemsSubtotal + deliveryFee;
+
+    // 3. Payment & Balance Due Calculations
     const cashAmount = Math.max(0, Number(payments.cash || 0));
     const mpesaAmount = Math.max(0, Number(payments.mpesa || 0));
     const totalTendered = cashAmount + mpesaAmount;
 
-    if (totalTendered < calculatedTotal) {
-      return res.status(400).json({
-        success: false,
-        message: `Total payment (KES ${totalTendered.toLocaleString()}) is less than total amount (KES ${calculatedTotal.toLocaleString()})`
-      });
+    let paymentStatus = 'paid';
+    let amountPaid = totalTendered;
+    let balanceDue = 0;
+
+    if (isSocialDelivery) {
+      if (totalTendered >= grandTotal) {
+        paymentStatus = 'paid';
+        balanceDue = 0;
+      } else if (totalTendered > 0) {
+        paymentStatus = 'partial_deposit';
+        balanceDue = Math.max(0, grandTotal - totalTendered);
+      } else {
+        paymentStatus = 'pending_pod';
+        balanceDue = grandTotal;
+      }
+    } else {
+      // Walk-in requires full immediate payment
+      if (totalTendered < grandTotal) {
+        return res.status(400).json({
+          success: false,
+          message: `Total payment (KES ${totalTendered.toLocaleString()}) is less than total amount (KES ${grandTotal.toLocaleString()})`
+        });
+      }
+      paymentStatus = 'paid';
+      amountPaid = grandTotal;
+      balanceDue = 0;
     }
 
-    // 3. Atomically Deduct Stock from Main Product Pool
+    // 4. Atomically Deduct Stock from Main Product Pool (Stock is reserved)
     for (const item of orderItems) {
       await Product.findByIdAndUpdate(item.product, {
         $inc: {
@@ -297,11 +367,8 @@ export const checkoutPOSSale = async (req, res) => {
       });
     }
 
-    // 4. Create Order Record and optionally link customer user account
-    const cleanPhone = customerPhone ? normalizePhone(customerPhone) : '';
+    // 5. Customer Account Lookup & Linking
     let matchedUserId = null;
-    let finalCustomerName = customerName || 'Walk-in Customer';
-
     if (cleanPhone) {
       const last9 = cleanPhone.slice(-9);
       const matchedUser = await User.findOne({
@@ -313,50 +380,78 @@ export const checkoutPOSSale = async (req, res) => {
 
       if (matchedUser) {
         matchedUserId = matchedUser._id;
-        if (!customerName || customerName === 'Walk-in Customer') {
+        if (!finalCustomerName || finalCustomerName === 'Walk-in Customer') {
           finalCustomerName = matchedUser.name;
         }
       }
     }
 
+    // 6. Create Order Record in MongoDB
+    const isPaid = paymentStatus === 'paid';
+    const cleanPlatform = ['instagram', 'whatsapp', 'tiktok'].includes(socialPlatform?.toLowerCase())
+      ? socialPlatform.toLowerCase()
+      : 'none';
+
     const order = await Order.create({
       items: orderItems,
-      totalAmount: calculatedTotal,
-      paymentMethod: (cashAmount > 0 && mpesaAmount > 0) ? 'Split' : (cashAmount > 0 ? 'Cash' : 'M-Pesa'),
+      totalAmount: grandTotal,
+      shippingPrice: deliveryFee,
+      orderType: isSocialDelivery ? 'social-delivery' : 'walk-in',
+      socialPlatform: cleanPlatform,
+      paymentStatus,
+      amountPaid,
+      balanceDue,
+      paymentMethod: (cashAmount > 0 && mpesaAmount > 0) 
+        ? 'Split' 
+        : (cashAmount > 0 ? 'Cash' : (mpesaAmount > 0 ? 'M-Pesa' : (isSocialDelivery ? 'POD' : 'Cash'))),
       payments: {
         cash: cashAmount,
         mpesa: mpesaAmount
       },
-      orderSource: 'pos',
+      deliveryDetails: {
+        customerName: finalCustomerName,
+        customerPhone: cleanPhone,
+        location: deliveryLocation,
+        deliveryFee,
+        riderNotes
+      },
+      orderSource: cleanPlatform === 'whatsapp' ? 'whatsapp' : 'pos',
       user: matchedUserId,
       cashier: req.user?._id,
-      isPaid: true,
-      paidAt: new Date(),
-      status: 'delivered', // Walk-in purchases are handed over immediately
+      isPaid,
+      paidAt: isPaid ? new Date() : null,
+      status: isSocialDelivery ? 'processing' : 'delivered',
       guestPhone: cleanPhone,
-      contactEmail: `pos-${Date.now()}@seekon.local`,
+      contactEmail: `${isSocialDelivery ? 'delivery' : 'pos'}-${Date.now()}@seekon.local`,
       shippingAddress: {
         name: finalCustomerName,
         phone: cleanPhone,
-        address: 'Seekon Physical Store Walk-in',
+        address: deliveryLocation || 'Seekon Physical Store Walk-in',
         city: 'Nairobi',
         postalCode: '00100'
       },
-      notes: notes || 'In-store POS Walk-in Sale'
+      notes: notes || (isSocialDelivery ? `Social Delivery (${cleanPlatform.toUpperCase()})` : 'In-store POS Walk-in Sale')
     });
 
-    // 5. Generate Branded PDF E-Receipt in Server Memory
+    // 7. Generate Branded PDF Document (Dispatch Slip or Paid Receipt)
     const receiptBuffer = await generateReceiptPDF(order, {
       cashierName: req.user?.name || req.user?.email || 'Store Cashier'
     });
 
-    // 6. Dispatch PDF E-Receipt via Baileys WhatsApp Bot (if customer phone provided)
+    // 8. Dispatch PDF via Baileys WhatsApp Bot (if requested and phone provided)
     let whatsappDispatched = false;
     let whatsappError = null;
 
-    if (cleanPhone) {
+    if (shouldSendReceipt && cleanPhone) {
       try {
-        const waResult = await sendWhatsAppReceipt(cleanPhone, receiptBuffer, order._id, calculatedTotal);
+        const waResult = await sendWhatsAppReceipt(cleanPhone, receiptBuffer, order._id, grandTotal, {
+          paymentStatus,
+          balanceDue,
+          amountPaid,
+          customerName: finalCustomerName,
+          location: deliveryLocation,
+          socialPlatform: cleanPlatform
+        });
         whatsappDispatched = waResult.success;
       } catch (err) {
         console.error('WhatsApp receipt dispatch failed:', err.message);
@@ -364,7 +459,7 @@ export const checkoutPOSSale = async (req, res) => {
       }
     }
 
-    // 7. If checkout originated from WhatsApp Queue, mark PendingOrder completed
+    // 9. If checkout originated from WhatsApp Queue, mark PendingOrder completed
     if (pendingOrderId) {
       try {
         await PendingOrder.findByIdAndUpdate(pendingOrderId, {
@@ -379,10 +474,18 @@ export const checkoutPOSSale = async (req, res) => {
 
     res.status(201).json({
       success: true,
-      message: 'Sale completed and stock deducted successfully',
+      message: isSocialDelivery 
+        ? 'Delivery order logged & dispatch slip generated'
+        : 'Sale completed and stock deducted successfully',
       order: {
         id: order._id,
+        orderType: order.orderType,
+        socialPlatform: order.socialPlatform,
+        paymentStatus: order.paymentStatus,
         totalAmount: order.totalAmount,
+        amountPaid: order.amountPaid,
+        balanceDue: order.balanceDue,
+        deliveryDetails: order.deliveryDetails,
         itemsCount: orderItems.length,
         paymentMethod: order.paymentMethod,
         payments: order.payments,
@@ -397,6 +500,195 @@ export const checkoutPOSSale = async (req, res) => {
     res.status(500).json({
       success: false,
       message: error.message || 'Checkout failed'
+    });
+  }
+};
+
+/**
+ * @route   GET /api/pos/deliveries
+ * @desc    Fetch active social media / POD orders awaiting delivery & reconciliation
+ * @access  Private (Admin, Cashier)
+ */
+export const getPendingDeliveries = async (req, res) => {
+  try {
+    const deliveries = await Order.find({
+      orderType: 'social-delivery',
+      paymentStatus: { $in: ['pending_pod', 'partial_deposit'] },
+      status: { $ne: 'cancelled' }
+    })
+      .sort({ createdAt: -1 })
+      .populate('cashier', 'name email')
+      .populate('items.product', 'name price stock image')
+      .lean();
+
+    res.status(200).json({
+      success: true,
+      count: deliveries.length,
+      deliveries
+    });
+  } catch (error) {
+    console.error('Error fetching pending deliveries:', error);
+    res.status(500).json({
+      success: false,
+      message: 'Failed to fetch pending deliveries'
+    });
+  }
+};
+
+/**
+ * @route   POST /api/pos/orders/:id/complete-payment
+ * @desc    Reconcile delivery order: complete balance payment, mark paid, dispatch final official receipt
+ * @access  Private (Admin, Cashier)
+ */
+export const completeDeliveryPayment = async (req, res) => {
+  try {
+    const { id } = req.params;
+    const { payments = { cash: 0, mpesa: 0 }, paymentMethod = 'Split', notes = '' } = req.body;
+
+    const order = await Order.findById(id);
+    if (!order) {
+      return res.status(404).json({ success: false, message: 'Order not found' });
+    }
+
+    if (order.status === 'cancelled' || order.paymentStatus === 'cancelled') {
+      return res.status(400).json({ success: false, message: 'Cannot complete payment on a cancelled order' });
+    }
+
+    if (order.paymentStatus === 'paid') {
+      return res.status(400).json({ success: false, message: 'Order has already been paid in full' });
+    }
+
+    const cashAdded = Math.max(0, Number(payments.cash || 0));
+    const mpesaAdded = Math.max(0, Number(payments.mpesa || 0));
+    const totalTendered = cashAdded + mpesaAdded;
+
+    order.payments = {
+      cash: (order.payments?.cash || 0) + cashAdded,
+      mpesa: (order.payments?.mpesa || 0) + mpesaAdded
+    };
+
+    order.amountPaid = (order.amountPaid || 0) + totalTendered;
+    order.balanceDue = Math.max(0, order.totalAmount - order.amountPaid);
+
+    if (order.balanceDue === 0 || totalTendered >= (order.balanceDue || 0)) {
+      order.paymentStatus = 'paid';
+      order.isPaid = true;
+      order.paidAt = new Date();
+      order.status = 'delivered';
+      order.balanceDue = 0;
+    } else {
+      order.paymentStatus = 'partial_deposit';
+    }
+
+    if (paymentMethod) {
+      order.paymentMethod = paymentMethod;
+    }
+    if (notes) {
+      order.notes = `${order.notes || ''} • Reconciled: ${notes}`.trim();
+    }
+    order.cashier = req.user?._id;
+
+    await order.save();
+
+    // Generate Final Official Paid E-Receipt
+    const receiptBuffer = await generateReceiptPDF(order, {
+      cashierName: req.user?.name || req.user?.email || 'Store Cashier'
+    });
+
+    // Send final official receipt to customer's WhatsApp
+    const customerPhone = order.deliveryDetails?.customerPhone || order.guestPhone || order.shippingAddress?.phone;
+    let whatsappDispatched = false;
+    let whatsappError = null;
+
+    if (customerPhone) {
+      try {
+        const waResult = await sendWhatsAppReceipt(customerPhone, receiptBuffer, order._id, order.totalAmount, {
+          paymentStatus: order.paymentStatus,
+          balanceDue: order.balanceDue,
+          amountPaid: order.amountPaid,
+          customerName: order.deliveryDetails?.customerName
+        });
+        whatsappDispatched = waResult.success;
+      } catch (err) {
+        console.error('Failed to send final WhatsApp receipt:', err.message);
+        whatsappError = err.message;
+      }
+    }
+
+    res.status(200).json({
+      success: true,
+      message: 'Delivery payment completed & official receipt dispatched',
+      order: {
+        id: order._id,
+        paymentStatus: order.paymentStatus,
+        status: order.status,
+        amountPaid: order.amountPaid,
+        balanceDue: order.balanceDue,
+        payments: order.payments
+      },
+      whatsappDispatched,
+      whatsappError,
+      receiptBase64: receiptBuffer.toString('base64')
+    });
+  } catch (error) {
+    console.error('Error completing delivery payment:', error);
+    res.status(500).json({
+      success: false,
+      message: error.message || 'Failed to complete delivery payment'
+    });
+  }
+};
+
+/**
+ * @route   POST /api/pos/orders/:id/cancel-delivery
+ * @desc    Cancel a delivery order & automatically restock inventory via $inc
+ * @access  Private (Admin, Cashier)
+ */
+export const cancelDeliveryAndRestock = async (req, res) => {
+  try {
+    const { id } = req.params;
+    const { reason = 'Customer cancelled or delivery returned' } = req.body;
+
+    const order = await Order.findById(id);
+    if (!order) {
+      return res.status(404).json({ success: false, message: 'Order not found' });
+    }
+
+    if (order.status === 'cancelled' || order.paymentStatus === 'cancelled') {
+      return res.status(400).json({ success: false, message: 'Order is already cancelled' });
+    }
+
+    // Atomically increment stock back to each product in Product collection
+    for (const item of order.items || []) {
+      if (item.product) {
+        await Product.findByIdAndUpdate(item.product, {
+          $inc: {
+            stock: item.quantity,
+            sold: -item.quantity
+          }
+        });
+      }
+    }
+
+    order.paymentStatus = 'cancelled';
+    order.status = 'cancelled';
+    order.notes = `${order.notes || ''} • Cancelled & Restocked: ${reason}`.trim();
+    await order.save();
+
+    res.status(200).json({
+      success: true,
+      message: 'Order cancelled successfully and product inventory restocked',
+      order: {
+        id: order._id,
+        status: order.status,
+        paymentStatus: order.paymentStatus
+      }
+    });
+  } catch (error) {
+    console.error('Error cancelling delivery order:', error);
+    res.status(500).json({
+      success: false,
+      message: error.message || 'Failed to cancel delivery order'
     });
   }
 };
@@ -477,8 +769,12 @@ export const getOrderReceiptPDF = async (req, res) => {
       cashierName: order.cashier?.name || 'Seekon Cashier'
     });
 
+    const isDispatchSlip = order.paymentStatus === 'pending_pod' || order.paymentStatus === 'partial_deposit';
+    const prefix = isDispatchSlip ? 'Dispatch-Slip' : 'Receipt';
+    const safeRef = String(order._id).slice(-6).toUpperCase();
+
     res.setHeader('Content-Type', 'application/pdf');
-    res.setHeader('Content-Disposition', `inline; filename="Receipt-SKN-${String(order._id).slice(-6).toUpperCase()}.pdf"`);
+    res.setHeader('Content-Disposition', `attachment; filename="${prefix}-SKN-${safeRef}.pdf"`);
     res.setHeader('Content-Length', receiptBuffer.length);
 
     res.end(receiptBuffer);

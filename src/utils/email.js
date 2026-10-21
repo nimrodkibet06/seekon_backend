@@ -808,12 +808,17 @@ export const sendOrderStatusUpdateEmail = async (email, order, newStatus) => {
 
     let deliveryDetailsHtml = '';
     if (order?.deliveryDetails) {
-      deliveryDetailsHtml = `
-        <div style="padding: 15px; background: #e3f2fd; border-radius: 8px; margin-bottom: 20px;">
-          <h3 style="margin: 0 0 10px 0;">Delivery Information</h3>
-          <p style="margin: 0;">${order.deliveryDetails}</p>
-        </div>
-      `;
+      const dText = typeof order.deliveryDetails === 'object'
+        ? [order.deliveryDetails.location, order.deliveryDetails.riderNotes].filter(Boolean).join(' • ')
+        : order.deliveryDetails;
+      if (dText) {
+        deliveryDetailsHtml = `
+          <div style="padding: 15px; background: #e3f2fd; border-radius: 8px; margin-bottom: 20px;">
+            <h3 style="margin: 0 0 10px 0;">Delivery Information</h3>
+            <p style="margin: 0;">${dText}</p>
+          </div>
+        `;
+      }
     }
 
     const statusHtml = `
