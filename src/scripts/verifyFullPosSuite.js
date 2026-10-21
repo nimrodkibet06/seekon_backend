@@ -278,6 +278,14 @@ Notes: Walk-in collection at Kilimani`;
   assert(parsedInterception2.quantity === 2, `Interception 2 extracted quantity: ${parsedInterception2.quantity}`);
   assert(parsedInterception2.location === 'Kilimani', `Interception 2 extracted location: ${parsedInterception2.location}`);
 
+  // Test real-world command center conversation drop (with typos & estate)
+  const staffDropUserCase = 'Customer Nick odered  the adidas mfx reebot phone number 0727672772 to be taken to juja';
+  assert(isOrderMessage(staffDropUserCase), `isOrderMessage identifies conversational drop: "${staffDropUserCase}"`);
+  const parsedUserCase = await parseWhatsAppOrderText(staffDropUserCase);
+  assert(parsedUserCase.customerName === 'Nick', `Conversational drop extracted customer name "Nick": got "${parsedUserCase.customerName}"`);
+  assert(parsedUserCase.customerPhone === '254727672772', `Conversational drop extracted phone: "${parsedUserCase.customerPhone}"`);
+  assert(parsedUserCase.location === 'Juja', `Conversational drop extracted location "Juja": "${parsedUserCase.location}"`);
+
   // Test "Served by: [Username]" in PDF generator
   const interceptedOrder = new Order({
     _id: new mongoose.Types.ObjectId(),

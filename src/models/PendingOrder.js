@@ -47,7 +47,7 @@ const pendingOrderSchema = new mongoose.Schema({
   },
   paymentMethod: {
     type: String,
-    enum: ['M-Pesa', 'Cash', 'Split', 'Card', 'Pending'],
+    enum: ['M-Pesa', 'Cash', 'Split', 'Card', 'Pending', 'POD', 'Cash on Delivery'],
     default: 'Pending'
   },
   payments: {

@@ -2050,6 +2050,8 @@ const handleAdminPanelUpsert = async (messages) => {
 // ─────────────────────────────────────────────────────────────────────────────
 const normalizeJid = (jid = '') => String(jid || '').replace(/['"]/g, '').trim();
 
+let detectedCommandCenterJid = '';
+
 // Target Group for POS Interception & Orders
 // Priority: POS_INTERCEPTION_GROUP_JID -> SEEKON_COMMAND_CENTER_JID -> COMMAND_CENTER_GROUP_JID -> ADMIN_GROUP_JID -> ADMIN_WHATSAPP_GROUP_ID
 const posInterceptionGroupJid = normalizeJid(
@@ -2074,11 +2076,20 @@ const handleCommandCenterOrderUpsert = async (messages) => {
       const remoteJid = msg.key?.remoteJid || '';
       if (!remoteJid) continue;
 
-      // Strictly listen to the designated group (POS_INTERCEPTION_GROUP_JID or fallback to Command Center / Admin group).
-      // Normal customer DMs to the bot are explicitly ignored here.
-      const isTargetGroup = (posInterceptionGroupJid && remoteJid === posInterceptionGroupJid) ||
-                            (commandCenterGroupJid && remoteJid === commandCenterGroupJid) ||
-                            (adminGroupJid && remoteJid === adminGroupJid);
+      // Strictly listen to WhatsApp group chats (@g.us). Customer 1-on-1 DMs (@s.whatsapp.net) are excluded.
+      const isGroup = remoteJid.endsWith('@g.us');
+      if (!isGroup) continue;
+
+      const isConfiguredGroup = (posInterceptionGroupJid && remoteJid === posInterceptionGroupJid) ||
+                                (commandCenterGroupJid && remoteJid === commandCenterGroupJid) ||
+                                (adminGroupJid && remoteJid === adminGroupJid) ||
+                                (detectedCommandCenterJid && remoteJid === detectedCommandCenterJid);
+
+      const hasSpecificGroupBound = Boolean(posInterceptionGroupJid || commandCenterGroupJid || adminGroupJid || detectedCommandCenterJid);
+
+      // If a specific group JID is configured or discovered, prioritize that.
+      // If none is bound yet, accept any participating group (@g.us) as fallback so commands are never lost.
+      const isTargetGroup = hasSpecificGroupBound ? isConfiguredGroup : isGroup;
 
       if (!isTargetGroup) continue;
 
@@ -2343,6 +2354,20 @@ export const initWhatsAppClient = async () => {
       currentQR = null;
       isConnected = true;
       console.log('🚀 [WA]: Socket OPEN — Baileys authenticated and live!');
+
+      // Auto-discover Command Center group from WhatsApp account
+      sock.groupFetchAllParticipating().then((participatingGroups) => {
+        for (const [jid, grp] of Object.entries(participatingGroups || {})) {
+          const subject = (grp?.subject || '').toLowerCase();
+          if (subject.includes('command center') || subject.includes('seekon command') || subject.includes('command')) {
+            detectedCommandCenterJid = jid;
+            console.log(`🎯 [WA-GROUP]: Auto-discovered Command Center Group: "${grp.subject}" (${jid})`);
+            break;
+          }
+        }
+      }).catch((grpErr) => {
+        console.warn('⚠️ [WA-GROUP]: Could not auto-fetch groups on startup:', grpErr.message);
+      });
 
       // STEP 4 — Recovery: re-fire any tasks that were 'pending' when the
       // process was last killed. Runs async so it never blocks the open event.
