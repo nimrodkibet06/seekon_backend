@@ -19,11 +19,12 @@ export const searchProductsForPOS = async (req, res) => {
 
     if (q && q.trim()) {
       const cleanQ = q.trim();
-      const regex = new RegExp(cleanQ, 'i');
+      const escapedQ = cleanQ.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+      const regex = new RegExp(escapedQ, 'i');
 
       query.$or = [
         { name: regex },
-        { barcode: cleanQ },
+        { barcode: regex },
         { sku: regex },
         { brand: regex },
         { category: regex }
