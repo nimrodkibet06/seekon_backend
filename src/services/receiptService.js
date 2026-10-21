@@ -5,7 +5,8 @@ import { fileURLToPath } from 'url';
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
-const LOCAL_LOGO_PATH = path.resolve(__dirname, '../assets/seekon_bg-removebg-preview.png');
+const LOCAL_DARK_LOGO_PATH = path.resolve(__dirname, '../assets/seekon_bg-removebg-preview.png');
+const LOCAL_WHITE_LOGO_PATH = path.resolve(__dirname, '../assets/seekon_logo_white.png');
 
 /**
  * Generates an in-memory branded PDF document for POS / WhatsApp orders.
@@ -13,8 +14,10 @@ const LOCAL_LOGO_PATH = path.resolve(__dirname, '../assets/seekon_bg-removebg-pr
  *  - "pending_pod" / "partial_deposit": Generates "ORDER CONFIRMATION & DISPATCH SLIP"
  *  - "paid": Generates "OFFICIAL E-RECEIPT (PAID)"
  * 
+ * Features high-contrast dark-mode safe branding and explicit "Served by" attribution.
+ * 
  * @param {object} order - The populated Order document.
- * @param {object} options - Optional metadata (cashierName, customNotes).
+ * @param {object} options - Optional metadata (servedBy, cashierName, customNotes).
  * @returns {Promise<Buffer>}
  */
 export const generateReceiptPDF = async (order, options = {}) => {
@@ -41,16 +44,29 @@ export const generateReceiptPDF = async (order, options = {}) => {
       const CONTENT_WIDTH = RIGHT_X - LEFT_X;
 
       // ─────────────────────────────────────────────────────────────────
-      // 1. BRAND HEADER WITH LOGO INTEGRATION & STATUS PILL
+      // 1. BRAND HEADER WITH DARK-MODE RESILIENT LOGO
       // ─────────────────────────────────────────────────────────────────
-      const hasLogo = fs.existsSync(LOCAL_LOGO_PATH);
+      const hasWhiteLogo = fs.existsSync(LOCAL_WHITE_LOGO_PATH);
+      const hasDarkLogo = fs.existsSync(LOCAL_DARK_LOGO_PATH);
+      const hasLogo = hasWhiteLogo || hasDarkLogo;
       const HEADER_HEIGHT = hasLogo ? 62 : 48;
 
-      doc.rect(0, 0, PAGE_WIDTH, HEADER_HEIGHT).fill('#09090b'); // Obsidian glass / zinc-950
+      // Deep Obsidian background (#09090b)
+      doc.rect(0, 0, PAGE_WIDTH, HEADER_HEIGHT).fill('#09090b');
 
       if (hasLogo) {
         try {
-          doc.image(LOCAL_LOGO_PATH, (PAGE_WIDTH - 90) / 2, 8, { width: 90 });
+          if (hasWhiteLogo) {
+            // High-contrast pure white logo that shines on dark header
+            doc.image(LOCAL_WHITE_LOGO_PATH, (PAGE_WIDTH - 90) / 2, 8, { width: 90 });
+          } else {
+            // Safe fallback: draw a crisp rounded white pill behind dark logo
+            const pillW = 96;
+            const pillH = 34;
+            const pillX = (PAGE_WIDTH - pillW) / 2;
+            doc.roundedRect(pillX, 6, pillW, pillH, 6).fill('#FFFFFF');
+            doc.image(LOCAL_DARK_LOGO_PATH, pillX + 3, 8, { width: pillW - 6 });
+          }
         } catch (imgErr) {
           console.warn('Receipt logo draw fallback:', imgErr.message);
           doc.fillColor('#FFFFFF')
@@ -108,7 +124,7 @@ export const generateReceiptPDF = async (order, options = {}) => {
       currentY += 8;
 
       // ─────────────────────────────────────────────────────────────────
-      // 3. DOCUMENT META & CUSTOMER / DISPATCH DETAILS
+      // 3. DOCUMENT META, SERVED BY & CUSTOMER DETAILS
       // ─────────────────────────────────────────────────────────────────
       const orderDate = new Date(order.createdAt || Date.now()).toLocaleString('en-KE', {
         dateStyle: 'medium',
@@ -116,7 +132,7 @@ export const generateReceiptPDF = async (order, options = {}) => {
       });
 
       const orderRef = (order._id ? String(order._id).slice(-8) : 'ORD-POS').toUpperCase();
-      const cashierName = options.cashierName || order.cashier?.name || 'Store Cashier';
+      const servedByName = options.servedBy || options.cashierName || order.cashier?.name || order.cashier?.email?.split('@')[0] || 'Store Cashier';
       const customerPhone = order.deliveryDetails?.customerPhone || order.guestPhone || order.shippingAddress?.phone || order.phoneNumber || 'Walk-in Customer';
       const customerName = order.deliveryDetails?.customerName || order.shippingAddress?.name || order.user?.name || 'Customer';
 
@@ -133,8 +149,11 @@ export const generateReceiptPDF = async (order, options = {}) => {
          .text(orderDate, LEFT_X, currentY, { width: CONTENT_WIDTH, align: 'right' });
 
       currentY += 11;
-      doc.text(`Cashier: ${cashierName}`, LEFT_X, currentY);
-      doc.text(`Customer: ${customerPhone}`, LEFT_X, currentY, { width: CONTENT_WIDTH, align: 'right' });
+      // Explicit "Served by: [Username]" attribution
+      doc.font('Helvetica-Bold').fillColor('#111827').text(`Served by: `, LEFT_X, currentY, { continued: true });
+      doc.font('Helvetica').fillColor('#374151').text(servedByName);
+
+      doc.font('Helvetica').fillColor('#6B7280').text(`Customer: ${customerPhone}`, LEFT_X, currentY, { width: CONTENT_WIDTH, align: 'right' });
 
       // Delivery-specific meta rows
       if (isDispatchSlip || order.orderType === 'social-delivery') {
@@ -142,7 +161,7 @@ export const generateReceiptPDF = async (order, options = {}) => {
         const platform = (order.socialPlatform && order.socialPlatform !== 'none') 
           ? order.socialPlatform.toUpperCase() 
           : 'SOCIAL';
-        doc.font('Helvetica').fillColor('#6B7280').text(`Platform: `, LEFT_X, currentY, { continued: true });
+        doc.font('Helvetica').fillColor('#6B7280').text(`Channel: `, LEFT_X, currentY, { continued: true });
         doc.font('Helvetica-Bold').fillColor('#111827').text(platform);
 
         doc.font('Helvetica').fillColor('#6B7280').text(`Name: `, LEFT_X + 110, currentY, { continued: true, width: CONTENT_WIDTH - 110, align: 'right' });
@@ -274,7 +293,6 @@ export const generateReceiptPDF = async (order, options = {}) => {
 
       // Payment Details & Deposit Lines
       if (isDispatchSlip) {
-        // Dispatch Slip: show deposit paid (if any) and bold balance banner
         doc.fontSize(7.5).font('Helvetica').fillColor('#4B5563').text('Deposit Paid Now:', LEFT_X, currentY);
         doc.font('Helvetica-Bold').fillColor(totalPaid > 0 ? '#10B981' : '#6B7280')
            .text(`KES ${totalPaid.toLocaleString()}`, RIGHT_X - 70, currentY, { width: 70, align: 'right' });

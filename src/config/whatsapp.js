@@ -38,7 +38,10 @@ import StatusTask  from '../models/StatusTask.js';
 import Setting from '../models/Setting.js';
 import HeroHistory from '../models/HeroHistory.js';
 import { normalizePhone } from '../utils/phoneFormatter.js';
+import Order from '../models/Order.js';
+import Product from '../models/Product.js';
 import PendingOrder from '../models/PendingOrder.js';
+import { generateReceiptPDF } from '../services/receiptService.js';
 import { isOrderMessage, parseWhatsAppOrderText } from '../services/whatsappOrderParser.js';
 import User from '../models/User.js';
 import Admin from '../models/Admin.js';
@@ -2075,50 +2078,188 @@ const handleCommandCenterOrderUpsert = async (messages) => {
       ).trim();
 
       if (!text || !isOrderMessage(text)) continue;
-
       if (msg.key?.id && sentMessageIds.has(msg.key.id)) continue;
 
-      console.log('📦 [POS-QUEUE]: Manual order detected in Command Center! Parsing...');
+      console.log('📦 [POS-INTERCEPTION]: Order message intercepted from:', remoteJid);
+
+      // Determine who served / forwarded this order
+      const senderJid = msg.key?.participant || remoteJid;
+      const senderPhone = senderJid.replace(/[^0-9]/g, '');
+      let servedBy = msg.pushName || 'WhatsApp Staff';
+      let staffUser = null;
+
+      if (senderPhone) {
+        staffUser = await User.findOne({
+          $or: [
+            { phoneNumber: { $regex: senderPhone.slice(-9) } },
+            { phone: { $regex: senderPhone.slice(-9) } }
+          ]
+        }).select('_id name role');
+
+        if (staffUser?.name) {
+          servedBy = staffUser.name;
+        }
+      }
+
+      // Parse order instruction
       const parsed = await parseWhatsAppOrderText(text);
 
       if (!parsed.customerPhone) {
-        console.warn('⚠️ [POS-QUEUE]: Order dropped without recognizable customer phone number.');
+        console.warn('⚠️ [POS-INTERCEPTION]: Order dropped without recognizable customer phone number.');
         continue;
       }
 
-      const existing = await PendingOrder.findOne({
-        customerPhone: parsed.customerPhone,
-        totalAmount: parsed.totalAmount,
-        status: 'pending',
-        createdAt: { $gte: new Date(Date.now() - 5 * 60 * 1000) }
-      });
+      const cleanCustomerPhone = normalizePhone(parsed.customerPhone);
 
-      if (existing) {
-        console.log('ℹ️ [POS-QUEUE]: Duplicate pending order ignored for:', parsed.customerPhone);
-        continue;
-      }
+      // ── AUTO-POS INTERCEPTION PATH ──────────────────────────────────────────
+      // If a matching Product was found in the inventory: AUTO-CREATE POD ORDER!
+      if (parsed.matchedProduct && parsed.items?.length > 0) {
+        const matchedProd = parsed.matchedProduct;
+        const reqQty = parsed.quantity || 1;
+        const unitPrice = matchedProd.price || 0;
+        const totalAmount = unitPrice * reqQty;
 
-      const pendingOrder = await PendingOrder.create({
-        ...parsed,
-        rawMessage: text,
-        senderJid: msg.key?.participant || remoteJid,
-        groupJid: remoteJid
-      });
+        // Atomically deduct inventory stock
+        if (typeof matchedProd.stock === 'number') {
+          await Product.findByIdAndUpdate(matchedProd._id, {
+            $inc: { stock: -reqQty, sold: reqQty }
+          });
+        }
 
-      console.log(`✅ [POS-QUEUE]: Successfully queued PendingOrder #${pendingOrder._id} for ${parsed.customerPhone} (KES ${parsed.totalAmount})`);
+        // Link customer user account if already registered
+        let matchedUserId = null;
+        const matchedCust = await User.findOne({
+          $or: [
+            { phoneNumber: { $regex: cleanCustomerPhone.slice(-9) } },
+            { phone: { $regex: cleanCustomerPhone.slice(-9) } }
+          ]
+        }).select('_id name');
+        if (matchedCust) {
+          matchedUserId = matchedCust._id;
+          if (!parsed.customerName || parsed.customerName === 'WhatsApp Customer') {
+            parsed.customerName = matchedCust.name;
+          }
+        }
 
-      try {
-        await sock.sendMessage(remoteJid, {
-          text: `✅ *[Seekon POS Queue]*: Order logged into cashier terminal!\n` +
-                `• *Customer:* ${parsed.customerName} (+${parsed.customerPhone})\n` +
-                `• *Items:* ${parsed.items.length} item(s)\n` +
-                `• *Total:* KES ${parsed.totalAmount.toLocaleString()}\n` +
-                `• *Queue ID:* \`${pendingOrder._id}\`\n\n` +
-                `_Cashier can now confirm and complete sale on the POS dashboard._`
+        const deliveryLocation = parsed.location || 'Nairobi (To Confirm)';
+
+        // Create the real Order in MongoDB with paymentStatus 'pending_pod'
+        const order = await Order.create({
+          orderType: 'social-delivery',
+          socialPlatform: 'whatsapp',
+          paymentStatus: 'pending_pod',
+          totalAmount,
+          amountPaid: 0,
+          balanceDue: totalAmount,
+          deliveryDetails: {
+            customerName: parsed.customerName || 'WhatsApp Customer',
+            customerPhone: cleanCustomerPhone,
+            location: deliveryLocation,
+            deliveryFee: 0,
+            riderNotes: `Interception via WhatsApp by ${servedBy} (+${senderPhone})`
+          },
+          items: [{
+            product: matchedProd._id,
+            name: matchedProd.name,
+            price: unitPrice,
+            quantity: reqQty,
+            size: parsed.size || 'Standard',
+            color: 'Standard',
+            image: matchedProd.image || matchedProd.images?.[0] || ''
+          }],
+          orderSource: 'whatsapp',
+          user: matchedUserId,
+          cashier: staffUser?._id,
+          isPaid: false,
+          status: 'processing',
+          guestPhone: cleanCustomerPhone,
+          contactEmail: `pod-${Date.now()}@seekon.local`,
+          shippingAddress: {
+            name: parsed.customerName || 'WhatsApp Customer',
+            phone: cleanCustomerPhone,
+            address: deliveryLocation,
+            city: 'Nairobi',
+            postalCode: '00100'
+          },
+          notes: `WhatsApp Auto-POS Interception • Served by ${servedBy}`
         });
-      } catch (ackError) {
-        console.error('Failed to send queue acknowledgement:', ackError.message);
+
+        const orderRef = String(order._id).slice(-6).toUpperCase();
+        console.log(`🎉 [POS-INTERCEPTION]: Created Order #SKN-${orderRef} for +${cleanCustomerPhone} (KES ${totalAmount})`);
+
+        // Generate Dispatch Slip PDF with dark-mode safe Seekon logo
+        const dispatchSlipBuffer = await generateReceiptPDF(order, {
+          cashierName: servedBy,
+          servedBy: servedBy,
+          isDispatchSlip: true
+        });
+
+        // 1. Dispatch Slip PDF to Customer WhatsApp
+        try {
+          await sendWhatsAppReceipt(cleanCustomerPhone, dispatchSlipBuffer, order._id, totalAmount, {
+            paymentStatus: 'pending_pod',
+            balanceDue: totalAmount,
+            amountPaid: 0,
+            customerName: parsed.customerName,
+            location: deliveryLocation,
+            socialPlatform: 'whatsapp'
+          });
+        } catch (custErr) {
+          console.error('Failed to send slip to customer:', custErr.message);
+        }
+
+        // 2. Reply to Sender / Command Group with Order Confirmation & PDF
+        try {
+          const confirmationText =
+            `📦 *[Seekon Auto-POS Interception]*\n` +
+            `Order created & Dispatch Slip delivered to customer WhatsApp!\n\n` +
+            `• *Order #:* SKN-${orderRef}\n` +
+            `• *Customer:* ${parsed.customerName} (+${cleanCustomerPhone})\n` +
+            `• *Item:* ${matchedProd.name} (${parsed.size || 'Standard'}) x ${reqQty}\n` +
+            `• *Balance Due (POD):* KES ${totalAmount.toLocaleString()}\n` +
+            `• *Location:* ${deliveryLocation}\n` +
+            `• *Served by:* ${servedBy}\n\n` +
+            `_Stock reserved. Order is active on POS under Active Deliveries._`;
+
+          await sock.sendMessage(remoteJid, {
+            text: confirmationText
+          });
+
+          await sock.sendMessage(remoteJid, {
+            document: dispatchSlipBuffer,
+            mimetype: 'application/pdf',
+            fileName: `Seekon-Dispatch-${orderRef}.pdf`,
+            caption: `📄 Dispatch confirmation slip for #SKN-${orderRef}`
+          });
+        } catch (repErr) {
+          console.error('Failed to reply to sender:', repErr.message);
+        }
+
+      } else {
+        // ── QUEUE FALLBACK PATH ───────────────────────────────────────────────
+        // If product could not be automatically matched, queue in PendingOrder
+        const pendingOrder = await PendingOrder.create({
+          ...parsed,
+          rawMessage: text,
+          senderJid,
+          groupJid: remoteJid
+        });
+
+        console.log(`ℹ️ [POS-QUEUE]: Queued PendingOrder #${pendingOrder._id} for manual cashier assignment`);
+
+        try {
+          await sock.sendMessage(remoteJid, {
+            text: `⚠️ *[Seekon POS Queue]*: Product needs confirmation.\n` +
+                  `Order queued for cashier: \`${pendingOrder._id}\`\n` +
+                  `• Customer: +${cleanCustomerPhone}\n` +
+                  `• Served by: ${servedBy}\n` +
+                  `• Details: "${text}"`
+          });
+        } catch (ackError) {
+          console.error('Failed to send queue ack:', ackError.message);
+        }
       }
+
     } catch (err) {
       console.error('Error handling command center order upsert:', err);
     }
